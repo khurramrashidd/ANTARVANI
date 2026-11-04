@@ -1,0 +1,81 @@
+ANTARVANI setup  2026-11-04 13:12:01.878745
+Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
+
+=== 1. Project folder ===========================================
+  [OK]    pubspec.yaml and android/ found
+
+=== 2. Tools ====================================================
+  [OK]    flutter
+  [OK]    firebase CLI 15.34.1
+  [OK]    flutterfire
+
+=== 3. Old files ================================================
+  [OK]    no old files left over
+
+=== 4. Firebase config files ====================================
+  [OK]    .firebaserc -> antarvaani-the-voice
+  [OK]    firebase.json has the firestore section
+  [FIXED] firestore.rules written (master = khurramrashid0786@gmail.com)
+  [OK]    firestore.indexes.json
+
+=== 5. Firebase login ===========================================
+  [OK]    logged-in account can see antarvaani-the-voice
+
+=== 6. Firestore database =======================================
+  [OK]    database (default) exists in asia-south1
+
+=== 7. Deploy security rules ====================================
+  > firebase deploy --only firestore --project antarvaani-the-voice --non-interactive
+  [OK]    rules and indexes deployed
+
+=== 8. Android app registration =================================
+          applicationId: com.silentvoice.silent_voice_recorder
+  [OK]    lib/firebase_options.dart and google-services.json match antarvaani-the-voice
+  [OK]    google-services Gradle plugin applied
+
+=== 9. SHA-1 fingerprint (Google sign-in fails silently without it) ===
+          this laptop's debug SHA-1: 28:19:F3:76:45:4E:6D:CD:96:4A:A7:2B:C5:FE:BB:33:7E:64:EC:8F
+          (release APKs built on this laptop use the same key by default)
+  [OK]    SHA-1 already registered
+  [OK]    google-services.json already contains this SHA-1
+
+=== 10. Google sign-in provider =================================
+  [OK]    Google sign-in is enabled (web client present in google-services.json)
+
+=== 11. One-time console steps ==================================
+  [OK]    Drive API enabled (you confirmed earlier)
+  [OK]    team: khurramrashid0786@gmail.com, kinzazahra0786@gmail.com, praptipatil5003@gmail.com, deshpandeshreya2005@gmail.com
+  [OK]    corpus folder shared with the team (you confirmed earlier)
+  [OK]    OAuth test users set (you confirmed earlier)
+  [OK]    Master admin: khurramrashid0786@gmail.com (admin by rule, cannot be locked out).
+          Team members: they sign in once, then in the app as khurramrashid0786@gmail.com:
+          sidebar -> Admin -> Users & roles -> set them to Collector.
+              kinzazahra0786@gmail.com
+              praptipatil5003@gmail.com
+              deshpandeshreya2005@gmail.com
+
+=== 12. Android manifest and Gradle =============================
+  [OK]    AndroidManifest already correct
+  [OK]    minSdk = 24
+          Android Gradle Plugin 9.1
+  [OK]    compileSdk = 36
+  [OK]    android/build.gradle.kts already correct (compileSdk 36)
+
+=== 13. Packages, icon, analyze, test ===========================
+  > flutter pub get
+  [OK]    flutter pub get
+  > dart run flutter_launcher_icons
+  [OK]    launcher icon generated
+  > flutter analyze
+          error - Target of URI doesn't exist: 'firebase_options.dart'. Try creating the file referenced by the URI, or try using a URI for a file that does exist - silent_voice_recorder\lib\main.dart:6:8 - uri_does_not_exist
+          error - Undefined name 'DefaultFirebaseOptions'. Try correcting the name to one that is defined, or defining the name - silent_voice_recorder\lib\main.dart:16:14 - undefined_identifier
+  [ERROR] flutter analyze: 2 errors, 0 warnings
+  > flutter test
+  [OK]    flutter test passed
+
+=== SUMMARY =====================================================
+  Fixed this run:
+    - firestore.rules written (master = khurramrashid0786@gmail.com)
+
+  1 error(s), 0 to-do. Fix those, then run setup again.
+  If stuck, send me setup_report.txt

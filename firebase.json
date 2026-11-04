@@ -1,0 +1,29 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "antarvaani-the-voice",
+          "appId": "1:752987903314:android:51d0e5e6095c63dc94968b",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "antarvaani-the-voice",
+          "configurations": {
+            "android": "1:752987903314:android:51d0e5e6095c63dc94968b",
+            "ios": "1:752987903314:ios:a1690852bd81bc4e94968b",
+            "macos": "1:752987903314:ios:a1690852bd81bc4e94968b",
+            "web": "1:752987903314:web:cfd7b2aeb17d57b594968b",
+            "windows": "1:752987903314:web:dbe937c85755ab5894968b"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

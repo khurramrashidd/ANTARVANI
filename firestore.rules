@@ -1,0 +1,136 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn()  { return request.auth != null; }
+    function email()     { return request.auth.token.email; }
+
+    // The one account that can never be locked out.
+    function isMaster()  { return signedIn() &&
+                           email() == 'khurramrashid0786@gmail.com'; }
+
+    function userDoc()   { return /databases/$(database)/documents/users/$(email()); }
+    function role()      { return get(userDoc()).data.role; }
+    function hasProfile(){ return signedIn() && exists(userDoc()); }
+
+    function isAdmin()   { return isMaster() || (hasProfile() && role() == 'admin'); }
+    function isMember()  { return isAdmin() || (hasProfile() && role() == 'member'); }
+
+    // Everyone who signs in. New people may only create themselves as a
+    // patient; they may refresh their own name/photo but never their role.
+    // Admins set patient/member; only the master grants or removes admin.
+    match /users/{userEmail} {
+      allow read: if signedIn() && (email() == userEmail || isAdmin());
+      allow create: if signedIn() && email() == userEmail &&
+        (request.resource.data.role == 'patient' ||
+         (isMaster() && request.resource.data.role == 'admin'));
+      allow update: if signedIn() && (
+        (email() == userEmail &&
+           request.resource.data.role == resource.data.role) ||
+        (isAdmin() && userEmail != 'khurramrashid0786@gmail.com' &&
+           (isMaster() || (resource.data.role != 'admin' &&
+                           request.resource.data.role != 'admin')))
+      );
+      allow delete: if isMaster() && userEmail != 'khurramrashid0786@gmail.com';
+    }
+
+    // Which APK everyone must be on. Read by anyone signed in, because the
+    // update screen blocks patients too; written only by the master.
+    match /config/{id} {
+      allow read:  if signedIn();
+      allow write: if isMaster();
+    }
+
+    // Shared speaker counter: S001, S002 ... for every collector.
+    match /counters/{id} {
+      allow read, write: if isMember();
+    }
+
+    // A volunteer linking their own account to the session they took part in.
+    // They never read the row first — they write the form number they typed
+    // as claimProof, and this rule accepts the write only if it matches the
+    // one already stored. A wrong guess is refused by the server, so nobody
+    // can walk through S001, S002, S003 looking at names.
+    function claimsOwnRow() {
+      return signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['claimedBy', 'claimedAt', 'claimProof'])
+        && request.resource.data.claimedBy == email()
+        && request.resource.data.claimProof == resource.data.consentFormId
+        && (!('claimedBy' in resource.data) ||
+            resource.data.claimedBy == null ||
+            resource.data.claimedBy == email());
+    }
+    function isClaimant() {
+      return signedIn() && 'claimedBy' in resource.data
+        && resource.data.claimedBy == email();
+    }
+    function claimedSpeaker(sid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/speakers/$(sid))
+        && get(/databases/$(database)/documents/speakers/$(sid))
+             .data.claimedBy == email();
+    }
+
+    // Collected data. Collectors record; only admins delete.
+    match /clips/{id} {
+      // A volunteer may read their own clips once their account is linked.
+      allow read:           if isMember() || claimedSpeaker(resource.data.speakerId);
+      allow create, update: if isMember();
+      // Only an admin wipes a clip record, and only as part of deleting a
+      // whole recording — everyday rejects set status instead.
+      allow delete:         if isAdmin();
+    }
+    match /speakers/{id} {
+      allow read:          if isMember() || isClaimant();
+      allow create:        if isMember();
+      allow update:        if isMember();
+      // The volunteer's own two writes: linking their account, and asking for
+      // their clips to be deleted. Nothing else on the row may change.
+      allow update: if claimsOwnRow();
+      allow update: if isClaimant()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['deletionRequested', 'deletionRequestedAt']);
+      // A collector may delete a speaker row they created and that produced
+      // nothing, so the number returns to the pool. Admins may delete any.
+      allow delete: if isAdmin() ||
+        (isMember() && resource.data.collectorEmail == email());
+    }
+    match /devices/{id} {
+      allow read, write: if isMember();
+    }
+
+    // A record that a whole recording was wiped: number, form number, how
+    // many clips, who and why. Never a name — the usual reason for wiping one
+    // is that the person asked to be forgotten.
+    match /deletions/{id} {
+      allow read:   if isMember();
+      // Any collector may delete a recording they made, so any of them may
+      // write the record of it.
+      allow create: if isMember();
+      // Drive only lets the uploader destroy their own files. When they
+      // finally do, they tick the leftovers off this record — and nothing
+      // else on it may change.
+      allow update: if isMember()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['pendingOwners', 'pendingFileIds', 'clearedAt']);
+      allow delete: if false;
+    }
+
+    // Team chat.
+    match /messages/{id} {
+      allow read, create: if isMember();
+      allow delete:       if isAdmin();
+    }
+
+    // A patient's own data (history, personalisation) — theirs alone.
+    match /patients/{ownerEmail}/{rest=**} {
+      allow read, write: if signedIn() && email() == ownerEmail;
+    }
+
+    // Anything not named above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

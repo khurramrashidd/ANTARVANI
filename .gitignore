@@ -1,0 +1,100 @@
+# ---------------------------------------------------------------------------
+#  ANTARVANI — what never goes to GitHub
+# ---------------------------------------------------------------------------
+#  Two kinds of thing are excluded: build output that anyone can regenerate,
+#  and anything carrying a key or a person's details. If you are unsure about
+#  a file, leave it out — a repo is easy to add to and very hard to scrub.
+# ---------------------------------------------------------------------------
+
+# ---- Secrets and per-machine config --------------------------------------
+# Written by `flutterfire configure` (which `setup` runs for you), and holds
+# the project's API keys and OAuth client IDs. Anyone cloning this repo runs
+# setup and gets their own.
+lib/firebase_options.dart
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+macos/Runner/GoogleService-Info.plist
+
+# Signing keys. Losing these is bad; publishing them is worse.
+*.jks
+*.keystore
+android/key.properties
+key.properties
+
+# Setup's own notes: team email addresses, SHA-1 fingerprints, what you have
+# already confirmed. Personal data, and useless to anyone else.
+.antarvani_setup.json
+setup_report.txt
+android/build.gradle.kts.antarvani.bak
+android/build.gradle.antarvani.bak
+
+# ---- Collected data -------------------------------------------------------
+# Clips live in Drive and nowhere else. The roster maps a speaker number to a
+# real person — it must never leave the team, let alone reach a public repo.
+*.apk
+*.aab
+roster*.csv
+manifest*.csv
+session.json
+manifest.csv
+corpus/
+clips/
+data/
+
+# ---- Flutter / Dart -------------------------------------------------------
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+pubspec.lock
+coverage/
+doc/api/
+*.dill
+*.lock.bak
+
+# ---- Android --------------------------------------------------------------
+android/.gradle/
+android/captures/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/.cxx/
+*.iml
+.gradle/
+local.properties
+
+# ---- iOS / macOS (not used yet, kept so a later port stays clean) ---------
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+macos/Pods/
+macos/Flutter/ephemeral/
+**/Flutter/ephemeral/
+**/ephemeral/
+
+# ---- Editors and OS -------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Firebase CLI ---------------------------------------------------------
+# firebase.json, .firebaserc, firestore.rules and firestore.indexes.json ARE
+# committed on purpose: the rules are the project's security policy and
+# belong under review like any other code.
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
