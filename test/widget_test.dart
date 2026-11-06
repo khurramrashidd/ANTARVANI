@@ -172,6 +172,41 @@ void main() {
     expect(numberIn('nonsense'), isNull);
   });
 
+  test('a mismatched pair is always two different sessions', () {
+    // S003 with F004 can never be valid: both labels come from one number.
+    for (final n in [1, 3, 14, 207]) {
+      final ids = SessionIds(n);
+      final other = SessionIds(n + 1);
+      expect(ids.speakerId.substring(1), ids.formNo.substring(1));
+      expect(ids.speakerId.substring(1) == other.formNo.substring(1), isFalse);
+    }
+  });
+
+  group('access codes', () {
+    test('four characters, never ones that are misread by hand', () {
+      const banned = ['O', '0', 'I', '1', 'L', 'S', '5', 'B', '8', 'Z', '2'];
+      for (var i = 0; i < 300; i++) {
+        final code = IdAllocator.newCode();
+        expect(code.length, 4);
+        for (final c in banned) {
+          expect(code.contains(c), isFalse, reason: '$code contains $c');
+        }
+      }
+    });
+
+    test('codes differ between sessions', () {
+      final codes = {for (var i = 0; i < 200; i++) IdAllocator.newCode()};
+      // 24^4 = 331,776 combinations, so 200 draws should rarely repeat.
+      expect(codes.length, greaterThan(190));
+    });
+
+    test('what people type is tidied before it is compared', () {
+      expect(IdAllocator.tidyCode(' 7kh4 '), '7KH4');
+      expect(IdAllocator.tidyCode('7-K-H-4'), '7KH4');
+      expect(IdAllocator.tidyCode('7kh4'), '7KH4');
+    });
+  });
+
   test('roles', () {
     const master = AppUser(
         email: Team.masterEmail, name: 'K', role: Roles.patient);

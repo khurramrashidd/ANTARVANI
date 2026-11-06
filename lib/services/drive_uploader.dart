@@ -388,6 +388,40 @@ class DriveUploader {
     }
   }
 
+  /// Lets one person read one file. Used so a volunteer can watch their own
+  /// clips without the corpus folder being open to anyone with a link.
+  ///
+  /// Any editor of the folder can do this, not only the uploader — sharing is
+  /// a lighter permission than deleting.
+  Future<bool> shareWith(String fileId, String email) async {
+    final api = _api;
+    if (api == null) {
+      lastError = 'Drive is not connected.';
+      return false;
+    }
+    try {
+      await api.permissions.create(
+        drive.Permission()
+          ..role = 'reader'
+          ..type = 'user'
+          ..emailAddress = email,
+        fileId,
+        sendNotificationEmail: false,
+      );
+      lastError = null;
+      return true;
+    } catch (e) {
+      final msg = '$e';
+      // Already shared is success: the goal is that they can watch it.
+      if (msg.contains('alreadyExists') || msg.contains('duplicate')) {
+        return true;
+      }
+      lastError = 'Could not share the file: $e';
+      debugPrint(lastError);
+      return false;
+    }
+  }
+
   // -------------------------------------------------------------- reject
   /// Moves a file out of its phrase folder into `_rejected`. The file is not
   /// destroyed: it can be looked at later, and it no longer trains anything.

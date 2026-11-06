@@ -170,12 +170,44 @@ class _SetupScreenState extends State<SetupScreen> {
           children: [
             Text(ids.speakerId,
                 style: const TextStyle(
-                    fontSize: 40, fontWeight: FontWeight.w800, letterSpacing: 2)),
+                    fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 2)),
+            const SizedBox(height: 14),
+            const Text('Write BOTH of these on the paper form:'),
             const SizedBox(height: 8),
-            const Text('Write this on the paper consent form:'),
-            Text(ids.formNo,
-                style: const TextStyle(
-                    fontSize: 32, fontWeight: FontWeight.w700, letterSpacing: 2)),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Text('Form no.',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  Text(ids.formNo,
+                      style: const TextStyle(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 3)),
+                  const SizedBox(height: 10),
+                  Text('Access code',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  Text(ids.code.isEmpty ? '—' : ids.code,
+                      style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 6)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'The code is shown once. It is what lets this volunteer see '
+              'their own clips later, so write it clearly.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
         actions: [
@@ -185,7 +217,7 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(c, true),
-            child: Text('Written ${ids.formNo} — record'),
+            child: const Text('Written — record'),
           ),
         ],
       ),
@@ -201,6 +233,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
     _meta.speakerId = ids.speakerId;
     _meta.consentFormId = ids.formNo;
+    _meta.accessCode = ids.code;
     _meta.tier = _tier.code;
     _meta.name = _nameCtrl.text.trim();
     _meta.locationNote = _locationCtrl.text.trim();
@@ -343,8 +376,10 @@ class _SetupScreenState extends State<SetupScreen> {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  'The form number is issued when you press Start, and shown '
-                  'big on screen to copy onto the paper form.',
+                  'A form number and a 4-character access code are issued '
+                  'when you press Start. Copy both onto the paper form — the '
+                  'code is shown once and is what lets the volunteer see '
+                  'their own clips later.',
                   style: TextStyle(fontSize: 12),
                 ),
                 CheckboxListTile(

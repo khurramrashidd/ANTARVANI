@@ -304,13 +304,23 @@ const Map<String, Map<String, String>> _s = {
   },
   'mine_speaker_id': {'en': 'Speaker ID', 'hi': 'स्पीकर आईडी', 'mr': 'स्पीकर आयडी'},
   'mine_form_no': {'en': 'Form number', 'hi': 'फ़ॉर्म नंबर', 'mr': 'फॉर्म क्रमांक'},
+  'mine_code': {
+    'en': 'Access code',
+    'hi': 'एक्सेस कोड',
+    'mr': 'अ‍ॅक्सेस कोड',
+  },
+  'mine_code_hint': {
+    'en': 'The 4 letters and numbers written on your form.',
+    'hi': 'आपके फ़ॉर्म पर लिखे 4 अक्षर/अंक।',
+    'mr': 'तुमच्या फॉर्मवर लिहिलेली 4 अक्षरे/अंक.',
+  },
   'mine_hint': {
-    'en': 'Both are on the paper form you signed, written by the person who '
-        'recorded you. They look like S014 and F014.',
-    'hi': 'दोनों नंबर उसी काग़ज़ पर हैं जिस पर आपने हस्ताक्षर किए थे। वे S014 और '
-        'F014 जैसे दिखते हैं।',
-    'mr': 'दोन्ही क्रमांक तुम्ही सही केलेल्या कागदावर आहेत. ते S014 आणि F014 '
-        'असे दिसतात.',
+    'en': 'All three are on the paper form you signed, written by the person '
+        'who recorded you — S014, F014 and a short code like 7KH4.',
+    'hi': 'तीनों चीज़ें उसी काग़ज़ पर हैं जिस पर आपने हस्ताक्षर किए थे — S014, '
+        'F014 और 7KH4 जैसा छोटा कोड।',
+    'mr': 'तिन्ही गोष्टी तुम्ही सही केलेल्या कागदावर आहेत — S014, F014 आणि '
+        '7KH4 सारखा छोटा कोड.',
   },
   'mine_show': {
     'en': 'Show my recordings',
@@ -351,6 +361,15 @@ const Map<String, Map<String, String>> _s = {
     'hi': 'कोई आवाज़ रिकॉर्ड नहीं हुई, और आपका फ़ोन नंबर या पता कभी सेव नहीं किया गया।',
     'mr': 'कोणताही आवाज रेकॉर्ड झाला नाही, आणि तुमचा फोन नंबर किंवा पत्ता कधीही '
         'साठवला गेला नाही.',
+  },
+  'mine_watch': {'en': 'Watch', 'hi': 'देखें', 'mr': 'पहा'},
+  'mine_watch_denied': {
+    'en': 'Could not open it. If Drive says you need access, ask the person '
+        'who recorded you to share your clips.',
+    'hi': 'नहीं खुल सका। अगर ड्राइव कहे कि अनुमति चाहिए, तो जिसने आपकी रिकॉर्डिंग '
+        'की थी उनसे क्लिप शेयर करने को कहें।',
+    'mr': 'उघडता आले नाही. ड्राइव्ह परवानगी मागत असेल, तर ज्यांनी तुमचे '
+        'रेकॉर्डिंग केले त्यांना क्लिप शेअर करण्यास सांगा.',
   },
   'mine_delete': {
     'en': 'Ask for my clips to be deleted',

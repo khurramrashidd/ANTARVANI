@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
@@ -62,6 +64,9 @@ class IdAllocator {
           .get(const GetOptions(source: Source.server))
           .timeout(const Duration(seconds: 12));
       final seed = current.exists ? 0 : await _highestExisting();
+      // Made once, outside the transaction: Firestore may run the body more
+      // than once, and the code must be the one that was committed.
+      final code = newCode();
 
       final n = await _db.runTransaction<int>((tx) async {
         final snap = await tx.get(_counter);
@@ -72,7 +77,7 @@ class IdAllocator {
         // Smallest returned number first, so the set stays dense.
         final next = nextNumber(free: free, last: last);
         free.remove(next);
-        final ids = SessionIds(next);
+        final ids = SessionIds(next, code);
 
         tx.set(_counter, {
           'last': next > last ? next : last,
@@ -84,6 +89,10 @@ class IdAllocator {
         tx.set(_speakers.doc(ids.speakerId), {
           'speakerId': ids.speakerId,
           'consentFormId': ids.formNo,
+          // Written on the paper form by hand. Without it, "both numbers"
+          // proved nothing: F014 is just S014 with the letter changed, so
+          // anyone who saw one could work out the other.
+          'accessCode': ids.code,
           'number': next,
           'status': 'in_progress',
           'collectorEmail': Team.email,
@@ -94,7 +103,7 @@ class IdAllocator {
         return next;
       }, timeout: const Duration(seconds: 15));
 
-      return SessionIds(n);
+      return SessionIds(n, code);
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
         throw const IdAllocationError(
@@ -107,6 +116,18 @@ class IdAllocator {
       throw IdAllocationError('Could not get a speaker ID: $e');
     }
   }
+
+  /// The alphabet leaves out anything that is misread in handwriting: no
+  /// O or 0, no I, 1 or L, no S or 5, no B or 8, no Z or 2.
+  static const _alphabet = 'ACDEFGHJKMNPQRTUVWXY3467';
+  static final _rng = Random.secure();
+
+  static String newCode() => List.generate(
+      4, (_) => _alphabet[_rng.nextInt(_alphabet.length)]).join();
+
+  /// Uppercase, no spaces — people write these by hand.
+  static String tidyCode(String input) =>
+      input.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
   /// Which number comes next: the smallest one handed back, otherwise one
   /// past the highest ever issued. Pure, so it can be tested.
@@ -166,7 +187,12 @@ class IdAllocationError implements Exception {
 
 class SessionIds {
   final int number;
-  const SessionIds(this.number);
+
+  /// Four characters the volunteer needs to see their own clips later.
+  /// Empty for sessions recorded before access codes existed.
+  final String code;
+
+  const SessionIds(this.number, [this.code = '']);
 
   /// e.g. S014 (S1000 and up once past 999)
   String get speakerId => 'S${number.toString().padLeft(3, '0')}';

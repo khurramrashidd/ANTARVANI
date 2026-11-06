@@ -142,15 +142,34 @@ service cloud.firestore {
     // as claimProof, and this rule accepts the write only if it matches the
     // one already stored. A wrong guess is refused by the server, so nobody
     // can walk through S001, S002, S003 looking at names.
+    function hasCode() {
+      return 'accessCode' in resource.data && resource.data.accessCode != '';
+    }
+    function unclaimed() {
+      return !('claimedBy' in resource.data)
+        || resource.data.claimedBy == null
+        || resource.data.claimedBy == ''
+        || resource.data.claimedBy == email();
+    }
     function claimsOwnRow() {
       return signedIn()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['claimedBy', 'claimedAt', 'claimProof'])
+             .hasOnly(['claimedBy', 'claimedAt', 'claimProof', 'codeProof'])
         && request.resource.data.claimedBy == email()
         && request.resource.data.claimProof == resource.data.consentFormId
-        && (!('claimedBy' in resource.data) ||
-            resource.data.claimedBy == null ||
-            resource.data.claimedBy == email());
+        && (
+          // The access code is written on the paper form and nowhere else,
+          // so holding it is the proof. Whoever has it may take the link
+          // over — that is how a session a collector opened while testing
+          // reaches the volunteer it actually belongs to.
+          (hasCode()
+            && request.resource.data.codeProof == resource.data.accessCode)
+          ||
+          // No code on this session: the form number is derivable from the
+          // speaker number, so it proves nothing on its own. The first
+          // account to link keeps it until a collector unlinks it.
+          (!hasCode() && unclaimed())
+        );
     }
     function isClaimant() {
       return signedIn() && 'claimedBy' in resource.data

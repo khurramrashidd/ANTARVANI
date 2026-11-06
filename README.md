@@ -16,7 +16,24 @@ A smartphone camera-based silent speech interface. One app with two sides:
   and (admins) Import from Drive
 - Admin → Users & roles
 
+## Drive sharing — keep the corpus closed
+The corpus folder must stay shared with **specific people** (the team), never
+"anyone with the link". The folder's ID is hardcoded in
+`lib/services/drive_uploader.dart`, which is in this repository — so a public
+link would make every volunteer's face video readable by anyone who reads the
+code. The consent form promises the opposite.
+
+To let one volunteer watch their own clips, open their speaker page and tap
+**"Let this volunteer watch their own clips"**. That grants read access on
+those files alone, to that one Google account.
+
 ## What a volunteer can see
+Each session gets a random 4-character **access code** as well as its two
+numbers. It is shown once, when the collector is told what to write on the
+paper form, and the volunteer needs all three to open **My recordings**. The
+code is the part that is not guessable — the form number is only the speaker
+number with a different letter.
+
 A volunteer who took part can install the app, sign in, and open
 **My recordings**. They type both numbers from their consent form — speaker
 ID *and* form number — and see their own clips and the details stored about

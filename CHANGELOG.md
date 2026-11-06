@@ -4,6 +4,133 @@ Zip files are numbered: `ANTARVANI_app_v01.zip`, `v02`, `v03` … Always use the
 highest number. (This is the delivery number, not the app's `version:` in
 pubspec.yaml, which stays 1.0.0+1 until you decide to change it.)
 
+## v25 — 5 Nov 2026
+
+**"Already linked to a different account" — fixed.** A session could be
+claimed once and never again, so any session a collector opened while testing
+was locked away from the volunteer it belonged to. That is what S003 was
+hitting even with the right code.
+
+The rule now says: **knowing the access code is the proof.** The code is on
+the paper form and nowhere else, so whoever has it may take the link over.
+A session with **no** code keeps the old behaviour — the form number is
+derivable from the speaker number, so it proves nothing on its own, and the
+first account to link keeps it until someone unlinks it.
+
+**Unlink, for the cases a code cannot solve.** A speaker's page now shows
+"Linked to name@gmail.com — unlink" when a session is claimed. Unlinking
+frees it for the right person and touches nothing that was recorded.
+
+Messages are specific now: a collector who can read the row is told exactly
+who holds the link, and a volunteer is told that a collector can unlink it.
+
+## v24 — 5 Nov 2026
+
+**Volunteers can watch their own clips — without opening the corpus.**
+A speaker's page has **"Let this volunteer watch their own clips"**. It grants
+read access on that person's files alone, to that one Google account (any
+editor of the folder can do it, not just the uploader — sharing is a lighter
+permission than deleting). A **Watch** button then appears beside each clip in
+their *My recordings*.
+
+If they have not linked their account yet, the button asks for the address
+they will sign in with.
+
+> **Do not use "anyone with the link" on the corpus folder.** The folder ID is
+> hardcoded in `lib/services/drive_uploader.dart`, which is in the public
+> repository, so a public link makes every volunteer's face video readable by
+> anyone who reads the code — the exact opposite of what the consent form
+> promises. Per-person sharing exists so you never need it.
+
+**Access codes for older sessions.** A speaker with no code gets a
+**"Give this session an access code"** button; the code is shown once, big,
+to write on their existing paper form or tell them. Before this, S001 and the
+other pilot sessions could be opened by anyone who learned the speaker ID,
+since the form number is derivable from it.
+
+## v23 — 5 Nov 2026
+
+**`flutter analyze` is clean again.** The six `prefer_const_constructors`
+hints left after the duplicate folder was removed are fixed: the deletion
+notice on a speaker, the "uploading in the background" line, the update
+icon, and one `DeleteReport.blocked`. All info-level, none of them affected
+behaviour.
+
+## v22 — 5 Nov 2026
+
+**Catches the duplicate-project trap.** If the zip is extracted *into* the
+project folder instead of the folder above it, you end up with
+`silent_voice_recorder\silent_voice_recorder`. Everything looks right —
+setup's own checks pass, the tests pass — but `flutter analyze` reads every
+Dart file under the project, including the inner copy, and that copy has no
+`firebase_options.dart` (it is never in the zip). The result is two
+confusing errors about a file that is plainly there. The giveaway is the
+path in the error: `silent_voice_recorder\lib\main.dart` instead of
+`lib\main.dart`.
+
+Setup now finds any second copy, explains it, and offers to delete it.
+START_HERE.md says where to extract.
+
+## v21 — 4 Nov 2026
+
+**All three credentials are always in front of the team.** The access code
+was only on the speaker's own page; now the speaker ID, form number and
+access code appear together wherever a session does:
+
+- every row of the **Speakers** list,
+- the speaker's page, as three boxes — **tap any one to copy it**, for
+  reading back to someone who lost their form,
+- the **session finished** screen, so a collector who forgot to write them
+  down still has them,
+- the search box matches the access code as well as the names and numbers.
+
+Codes are stored on the speaker row, so they are there for good — nothing is
+only shown once to the team. (It is shown once to the *volunteer*; that is
+the point of writing it on their form.)
+
+Sessions recorded before codes existed say "no code" and still work on the
+two numbers alone.
+
+## v20 — 4 Nov 2026
+
+**Access codes — the two numbers now actually prove something.** Before this,
+"both numbers" was theatre: F014 is just S014 with a different letter, so
+anyone who learned one could work out the other.
+
+Every session now also gets a random 4-character code (`7KH4`). It is shown
+once, on the screen that tells the collector what to write on the paper form,
+and it is what the volunteer needs in **My recordings** alongside the two
+numbers. The alphabet leaves out everything that is misread in handwriting —
+no O or 0, no I, 1 or L, no S or 5, no B or 8, no Z or 2.
+
+- The rules check the code server-side, so a volunteer cannot get past it.
+- Sessions recorded before this change have no code and still work on the
+  form number alone.
+- The code appears on the speaker's page in the dashboard, so a collector can
+  read it back to someone who lost their form, and in the roster CSV.
+- **The consent form has a new box for it** (`docs/ANTARVANI_consent_form.pdf`)
+  and now tells the volunteer to keep the sheet so they can look themselves
+  up. Print the new version.
+
+## v19 — 4 Nov 2026
+
+**"My recordings" behaved differently for collectors and volunteers — fixed.**
+Two separate problems were hiding behind one screen:
+
+1. **S003 with F004 is genuinely invalid.** Both numbers come from the same
+   counter, so their digits always agree; a mismatched pair can never name a
+   real session. The app now says exactly that, straight away, instead of a
+   vague "does not match" after a round trip.
+2. **Collectors were not being checked at all.** The rules let any team
+   member write to a speaker row, so their claim went through whatever form
+   number they typed — which is why it "worked" on a collector's phone and
+   failed on a volunteer's. The app now verifies the pair itself for anyone
+   who can read the speaker list, so both see the same answer.
+
+Other messages on that screen are sharper too: a number that does not exist
+says so (and that it may have been recycled), and a session whose form
+number differs names the right one.
+
 ## v18 — 4 Nov 2026
 
 **`.gitignore` added**, for putting the project on GitHub. It keeps out build

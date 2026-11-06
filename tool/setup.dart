@@ -233,6 +233,57 @@ void cleanStrays() {
     }
   });
   if (!any) ok('no old files left over');
+
+  _checkNestedCopy();
+}
+
+/// A second copy of the project inside itself.
+///
+/// It happens when the zip is extracted INTO the project folder instead of
+/// the folder above it. Everything looks right — the real files are all
+/// there and setup's own checks pass — but `flutter analyze` reads every
+/// Dart file under the project, including the inner copy, and the inner copy
+/// has no firebase_options.dart (that file is never in the zip). The result
+/// is two baffling errors about a file that plainly exists.
+void _checkNestedCopy() {
+  final nested = <Directory>[];
+  try {
+    for (final e in Directory('.').listSync()) {
+      if (e is! Directory) continue;
+      final name = e.path.split(Platform.pathSeparator).last;
+      if (name.startsWith('.') ||
+          const {'lib', 'test', 'tool', 'docs', 'assets', 'android', 'ios',
+                 'web', 'macos', 'linux', 'windows', 'build'}.contains(name)) {
+        continue;
+      }
+      if (File('${e.path}${Platform.pathSeparator}pubspec.yaml').existsSync()) {
+        nested.add(e);
+      }
+    }
+  } catch (_) {
+    return;
+  }
+  if (nested.isEmpty) return;
+
+  for (final d in nested) {
+    info('There is a whole second copy of the project inside this one:');
+    info('    ${d.absolute.path}');
+    info('That comes from extracting the zip INTO the project folder instead');
+    info('of the folder above it. flutter analyze reads both copies, and the');
+    info('inner one has no firebase_options.dart — which is the error you');
+    info('are seeing.');
+    if (yes('Delete that inner copy?')) {
+      try {
+        d.deleteSync(recursive: true);
+        fixed('deleted the duplicate project at ${d.path}');
+      } catch (e) {
+        bad('Could not delete ${d.path}: $e');
+      }
+    } else {
+      todo('Delete the folder ${d.path} inside the project, then run setup '
+          'again.');
+    }
+  }
 }
 
 // ------------------------------------------------- 4. firebase.json etc.
@@ -289,15 +340,34 @@ service cloud.firestore {
     // as claimProof, and this rule accepts the write only if it matches the
     // one already stored. A wrong guess is refused by the server, so nobody
     // can walk through S001, S002, S003 looking at names.
+    function hasCode() {
+      return 'accessCode' in resource.data && resource.data.accessCode != '';
+    }
+    function unclaimed() {
+      return !('claimedBy' in resource.data)
+        || resource.data.claimedBy == null
+        || resource.data.claimedBy == ''
+        || resource.data.claimedBy == email();
+    }
     function claimsOwnRow() {
       return signedIn()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['claimedBy', 'claimedAt', 'claimProof'])
+             .hasOnly(['claimedBy', 'claimedAt', 'claimProof', 'codeProof'])
         && request.resource.data.claimedBy == email()
         && request.resource.data.claimProof == resource.data.consentFormId
-        && (!('claimedBy' in resource.data) ||
-            resource.data.claimedBy == null ||
-            resource.data.claimedBy == email());
+        && (
+          // The access code is written on the paper form and nowhere else,
+          // so holding it is the proof. Whoever has it may take the link
+          // over — that is how a session a collector opened while testing
+          // reaches the volunteer it actually belongs to.
+          (hasCode()
+            && request.resource.data.codeProof == resource.data.accessCode)
+          ||
+          // No code on this session: the form number is derivable from the
+          // speaker number, so it proves nothing on its own. The first
+          // account to link keeps it until a collector unlinks it.
+          (!hasCode() && unclaimed())
+        );
     }
     function isClaimant() {
       return signedIn() && 'claimedBy' in resource.data

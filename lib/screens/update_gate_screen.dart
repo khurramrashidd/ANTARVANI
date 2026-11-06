@@ -55,7 +55,7 @@ class UpdateGateScreen extends StatelessWidget {
                       children: [
                         const BrandLogo(size: 84),
                         const SizedBox(height: 20),
-                        Icon(Icons.system_update,
+                        const Icon(Icons.system_update,
                             size: 44, color: Brand.amber),
                         const SizedBox(height: 12),
                         Text(

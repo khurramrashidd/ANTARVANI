@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/l10n.dart';
 import '../../app/theme.dart';
 import '../../phrases.dart';
+import '../../services/drive_uploader.dart';
 import '../../services/participant_service.dart';
 import '../../services/team.dart';
 
@@ -22,6 +24,7 @@ class MyClipsScreen extends StatefulWidget {
 class _MyClipsScreenState extends State<MyClipsScreen> {
   final _speakerCtrl = TextEditingController();
   final _formCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
   final _svc = ParticipantService.instance;
 
   List<String> _ids = const [];
@@ -53,6 +56,7 @@ class _MyClipsScreenState extends State<MyClipsScreen> {
   void dispose() {
     _speakerCtrl.dispose();
     _formCtrl.dispose();
+    _codeCtrl.dispose();
     super.dispose();
   }
 
@@ -64,6 +68,7 @@ class _MyClipsScreenState extends State<MyClipsScreen> {
     final err = await _svc.claim(
       speakerId: _speakerCtrl.text,
       formNo: _formCtrl.text,
+      code: _codeCtrl.text,
     );
     if (!mounted) return;
     if (err != null) {
@@ -76,6 +81,7 @@ class _MyClipsScreenState extends State<MyClipsScreen> {
     final sid = ParticipantService.normalise(_speakerCtrl.text, 'S');
     _speakerCtrl.clear();
     _formCtrl.clear();
+    _codeCtrl.clear();
     if (!mounted) return;
     setState(() => _busy = false);
     await _reload(select: sid);
@@ -132,7 +138,18 @@ class _MyClipsScreenState extends State<MyClipsScreen> {
                     prefixIcon: const Icon(Icons.description_outlined),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _codeCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: InputDecoration(
+                    labelText: tr('mine_code'),
+                    hintText: '7KH4',
+                    helperText: tr('mine_code_hint'),
+                    prefixIcon: const Icon(Icons.key_outlined),
+                  ),
+                ),
+                const SizedBox(height: 14),
                 Text(tr('mine_hint'),
                     style: Theme.of(context).textTheme.bodySmall),
                 if (_error != null) ...[
@@ -412,6 +429,17 @@ class _ClipTile extends StatelessWidget {
   final Map<String, dynamic> clip;
   const _ClipTile({required this.clip});
 
+  /// Opens the clip in Drive. It plays only if the team has shared it with
+  /// this account — the clips are not public.
+  static Future<void> _watch(BuildContext context, String fileId) async {
+    final ok = await launchUrl(Uri.parse(DriveUploader.webLink(fileId)),
+        mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(tr('mine_watch_denied'))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final phraseId = clip['phraseId'] as String? ?? '';
@@ -419,6 +447,7 @@ class _ClipTile extends StatelessWidget {
     final phrase = idx < 0 ? null : kPhrases[idx];
     final rejected = clip['status'] == 'rejected';
     final uploaded = clip['uploaded'] == true;
+    final fileId = clip['driveFileId'] as String?;
     final color = rejected
         ? Colors.grey
         : uploaded
@@ -444,14 +473,25 @@ class _ClipTile extends StatelessWidget {
             '${tr('mine_take')} ${clip['take'] ?? 1}',
             style: const TextStyle(fontSize: 12),
           ),
-          trailing: Text(
-            rejected
-                ? tr('mine_removed')
-                : uploaded
-                    ? tr('mine_kept')
-                    : tr('mine_uploading'),
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w700, color: color),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                rejected
+                    ? tr('mine_removed')
+                    : uploaded
+                        ? tr('mine_kept')
+                        : tr('mine_uploading'),
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w700, color: color),
+              ),
+              if (!rejected && uploaded && fileId != null)
+                IconButton(
+                  tooltip: tr('mine_watch'),
+                  icon: const Icon(Icons.play_circle_outline),
+                  onPressed: () => _watch(context, fileId),
+                ),
+            ],
           ),
         ),
       ),

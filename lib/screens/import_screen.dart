@@ -134,6 +134,7 @@ class _ImportScreenState extends State<ImportScreen> {
 
     _meta.speakerId = ids.speakerId;
     _meta.consentFormId = ids.formNo;
+    _meta.accessCode = ids.code;
     _meta.name = _nameCtrl.text.trim();
     _meta.locationNote = _noteCtrl.text.trim();
     _meta.tier = 'A';
@@ -374,12 +375,28 @@ class _ImportScreenState extends State<ImportScreen> {
                         fontWeight: FontWeight.w800,
                         letterSpacing: 2)),
                 const SizedBox(height: 14),
-                const Text('Write this on the signed paper form:'),
+                const Text('Write BOTH of these on the signed paper form:'),
+                const SizedBox(height: 6),
                 Text(ids.formNo,
                     style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 3)),
+                const SizedBox(height: 8),
+                Text('Access code',
+                    style: Theme.of(context).textTheme.bodySmall),
+                Text(ids.code.isEmpty ? '—' : ids.code,
+                    style: const TextStyle(
                         fontSize: 34,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 2)),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 6)),
+                const SizedBox(height: 8),
+                Text(
+                  'Shown once. Without it this volunteer cannot look up their '
+                  'own clips.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),

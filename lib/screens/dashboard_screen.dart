@@ -83,6 +83,17 @@ class SpeakerView {
   String? get collectorEmail => raw['collectorEmail'] as String?;
   bool get publishable => raw['consentToPublishDataset'] == true;
 
+  /// What the volunteer types to see their own clips. Blank for sessions
+  /// recorded before codes existed.
+  String get accessCode => (raw['accessCode'] as String?) ?? '';
+
+  /// The volunteer's own account, once they have linked it in My recordings.
+  String get claimedBy => (raw['claimedBy'] as String?) ?? '';
+
+  /// Who has already been given read access to this speaker's clips.
+  List<String> get sharedWith =>
+      ((raw['sharedWith'] as List?) ?? const []).map((e) => '$e').toList();
+
   /// The volunteer opened the app and asked for their clips to be removed.
   bool get deletionRequested => raw['deletionRequested'] == true;
 
@@ -103,6 +114,7 @@ class SpeakerView {
       id.toLowerCase().contains(q) ||
       name.toLowerCase().contains(q) ||
       formNo.toLowerCase().contains(q) ||
+      accessCode.toLowerCase().contains(q) ||
       collectorName.toLowerCase().contains(q) ||
       (collectorEmail ?? '').toLowerCase().contains(q);
 }
@@ -1052,7 +1064,8 @@ class _RosterButtonState extends State<_RosterButton> {
 
   String _buildCsv() {
     const header = [
-      'speakerId', 'formNo', 'name', 'tier', 'clips', 'target', 'status',
+      'speakerId', 'formNo', 'accessCode', 'name', 'tier', 'clips', 'target',
+      'status',
       'ageBand', 'gender', 'firstLanguage', 'fluentHindi', 'facialHair',
       'glasses', 'lighting', 'phoneMount', 'cameraLens', 'locationNote',
       'consentGiven', 'publishable', 'collector', 'deviceModel',
@@ -1064,6 +1077,7 @@ class _RosterButtonState extends State<_RosterButton> {
       out.write([
         s.id,
         s.formNo,
+        s.accessCode,
         s.name,
         s.tier,
         widget.stats.liveOf(s.id).length,
@@ -1400,7 +1414,7 @@ class _SpeakersTabState extends State<_SpeakersTab> {
               TextField(
                 onChanged: (v) => setState(() => _q = v.trim()),
                 decoration: const InputDecoration(
-                  hintText: 'Find by name, S014, F014 or collector',
+                  hintText: 'Name, S014, F014, access code or collector',
                   prefixIcon: Icon(Icons.search),
                 ),
               ),
@@ -1466,9 +1480,11 @@ class _SpeakersTabState extends State<_SpeakersTab> {
                 ],
               ),
               subtitle: Text(
-                'form ${s.formNo} · tier ${s.tier} · '
-                '$phrases/${kPhrases.length} phrases\n'
+                '${s.id}  ·  ${s.formNo}  ·  '
+                '${s.accessCode.isEmpty ? "no code" : s.accessCode}\n'
+                'tier ${s.tier} · $phrases/${kPhrases.length} phrases · '
                 'by ${s.collectorName}',
+                style: const TextStyle(height: 1.4),
               ),
               isThreeLine: true,
               trailing: const Icon(Icons.chevron_right),
@@ -1581,9 +1597,30 @@ class SpeakerDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('${speaker.id} · form ${speaker.formNo}',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.w700)),
+                  Row(
+                    children: [
+                      _Credential(label: 'Speaker ID', value: speaker.id),
+                      _Credential(label: 'Form no.', value: speaker.formNo),
+                      _Credential(
+                        label: 'Access code',
+                        value: speaker.accessCode.isEmpty
+                            ? '—'
+                            : speaker.accessCode,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    speaker.accessCode.isEmpty
+                        ? 'Recorded before access codes existed — this '
+                            'volunteer looks themselves up with the two '
+                            'numbers alone.'
+                        : 'All three go on the paper form. Tap any of them to '
+                            'copy. Read them back if the volunteer loses '
+                            'their sheet.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
                   const SizedBox(height: 4),
                   Text(
                     '$live of ${speaker.targetClips} clips · tier '
@@ -1603,8 +1640,8 @@ class SpeakerDetailScreen extends StatelessWidget {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   if (speaker.deletionRequested)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
                       child: Text(
                         'This volunteer has asked for their clips to be '
                         'deleted. Throw away every clip below, then tell them '
@@ -1622,6 +1659,9 @@ class SpeakerDetailScreen extends StatelessWidget {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          if (canEdit)
+            _SpeakerActions(speaker: speaker, clips: clips),
           const SizedBox(height: 12),
           if (missing.isNotEmpty && canEdit)
             FilledButton.icon(
@@ -1651,6 +1691,205 @@ class SpeakerDetailScreen extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Two things a collector does after a session: give this volunteer an
+/// access code if their session predates codes, and let them watch their own
+/// clips on their own phone.
+class _SpeakerActions extends StatefulWidget {
+  final SpeakerView speaker;
+  final List<ClipView> clips;
+  const _SpeakerActions({required this.speaker, required this.clips});
+
+  @override
+  State<_SpeakerActions> createState() => _SpeakerActionsState();
+}
+
+class _SpeakerActionsState extends State<_SpeakerActions> {
+  bool _busy = false;
+
+  Future<void> _makeCode() async {
+    setState(() => _busy = true);
+    try {
+      final code =
+          await SyncService.instance.giveAccessCode(widget.speaker.id);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Access code created'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(code,
+                  style: const TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 8)),
+              const SizedBox(height: 12),
+              Text(
+                'Write it on the paper form for '
+                '${widget.speaker.name.isEmpty ? "this volunteer" : widget.speaker.name}, '
+                'or tell them. Without it they can no longer open their own '
+                'clips with the two numbers alone.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not create it: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _unlink() async {
+    final s = widget.speaker;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Unlink this account?'),
+        content: Text(
+          '${s.id} is linked to ${s.claimedBy}, so nobody else can open it in '
+          '"My recordings". Unlink it and the volunteer can link it with '
+          'their own account.\n\nNothing recorded is affected.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Leave it')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Unlink')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await SyncService.instance.unlinkVolunteer(s.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${s.id} unlinked')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not unlink: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _share() async {
+    final s = widget.speaker;
+    var email = s.claimedBy;
+
+    if (email.isEmpty) {
+      final ctrl = TextEditingController();
+      email = await showDialog<String>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Which account?'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'This volunteer has not opened "My recordings" yet, so we '
+                    'do not know their Google account. Type the address they '
+                    'will sign in with.',
+                    style: TextStyle(height: 1.35),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    keyboardType: TextInputType.emailAddress,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                        labelText: 'Google account', hintText: 'name@gmail.com'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel')),
+                FilledButton(
+                    onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                    child: const Text('Share')),
+              ],
+            ),
+          ) ??
+          '';
+    }
+    if (email.isEmpty || !email.contains('@') || !mounted) return;
+
+    setState(() => _busy = true);
+    final ids = widget.clips
+        .where((c) => c.live)
+        .map((c) => c.driveFileId)
+        .whereType<String>()
+        .toList();
+    final n = await SyncService.instance.shareClipsWith(
+      speakerId: s.id,
+      email: email,
+      driveFileIds: ids,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(n == 0
+          ? (SyncService.instance.drive.lastError ??
+              'Could not share these clips.')
+          : '$n clips shared with $email — a Play button now appears on '
+              'their phone.'),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.speaker;
+    final shared = s.sharedWith.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (s.accessCode.isEmpty)
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _makeCode,
+            icon: const Icon(Icons.key_outlined),
+            label: const Text('Give this session an access code'),
+          ),
+        if (s.accessCode.isEmpty) const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _share,
+          icon: Icon(shared ? Icons.visibility : Icons.visibility_outlined),
+          label: Text(shared
+              ? 'Shared with ${s.sharedWith.join(", ")} — share again'
+              : 'Let this volunteer watch their own clips'),
+        ),
+        if (s.claimedBy.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: Brand.urgent),
+            onPressed: _busy ? null : _unlink,
+            icon: const Icon(Icons.link_off),
+            label: Text('Linked to ${s.claimedBy} — unlink'),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -2273,6 +2512,46 @@ class _TeamTab extends StatelessWidget {
 // ======================================================================
 //  Small pieces
 // ======================================================================
+/// One of the three things written on a volunteer's paper form. Tap to copy —
+/// collectors read these out over the phone when someone loses their sheet.
+class _Credential extends StatelessWidget {
+  final String label;
+  final String value;
+  const _Credential({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: value == '—'
+            ? null
+            : () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Copied $value')));
+              },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                value,
+                style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);

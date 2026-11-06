@@ -681,10 +681,34 @@ class _RecordScreenState extends State<RecordScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Uploading in the background. Thank the volunteer and file '
-              'form ${widget.meta.consentFormId}.',
+              'their form.',
               textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: [
+                    Text('On the paper form',
+                        style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${widget.meta.speakerId}   '
+                      '${widget.meta.consentFormId}'
+                      '${widget.meta.accessCode.isEmpty ? "" : "   ${widget.meta.accessCode}"}',
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 2),
+                    ),
+                    Text('speaker · form · access code',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
             ),
             ],
             const SizedBox(height: 28),

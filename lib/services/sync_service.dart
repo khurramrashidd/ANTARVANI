@@ -328,7 +328,7 @@ class SyncService extends ChangeNotifier {
 
     if (withFiles.isNotEmpty) {
       if (!drive.signedIn && !await drive.connect(interactive: false)) {
-        return DeleteReport.blocked(
+        return const DeleteReport.blocked(
             'Connect Drive first — the videos have to go before the number '
             'can be reused.');
       }
@@ -401,6 +401,55 @@ class SyncService extends ChangeNotifier {
       stranded: stranded.length,
       pendingOwners: owners,
     );
+  }
+
+  /// Gives one volunteer read access to their own clips, so a Play button
+  /// works on their phone. Returns how many were shared.
+  Future<int> shareClipsWith({
+    required String speakerId,
+    required String email,
+    required List<String> driveFileIds,
+  }) async {
+    if (!drive.signedIn && !await drive.connect(interactive: false)) return 0;
+    var shared = 0;
+    for (final id in driveFileIds) {
+      if (await drive.shareWith(id, email)) shared++;
+    }
+    if (shared > 0) {
+      try {
+        await speakers.doc(speakerId).set({
+          'sharedWith': FieldValue.arrayUnion([email]),
+          'sharedAt': FieldValue.serverTimestamp(),
+          'sharedBy': Team.email,
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('share note failed: $e');
+      }
+    }
+    return shared;
+  }
+
+  /// Releases a session that is linked to the wrong account — usually a
+  /// collector who opened it while testing. The volunteer can then link it.
+  Future<void> unlinkVolunteer(String speakerId) =>
+      speakers.doc(speakerId).set({
+        'claimedBy': FieldValue.delete(),
+        'claimedAt': FieldValue.delete(),
+        'claimProof': FieldValue.delete(),
+        'codeProof': FieldValue.delete(),
+        'unlinkedBy': Team.email,
+        'unlinkedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+  /// Fills in an access code for a session recorded before codes existed.
+  Future<String> giveAccessCode(String speakerId) async {
+    final code = IdAllocator.newCode();
+    await speakers.doc(speakerId).set({
+      'accessCode': code,
+      'accessCodeAddedBy': Team.email,
+      'accessCodeAddedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    return code;
   }
 
   /// Destroys files an earlier deletion could not touch, now that the person

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'id_allocator.dart';
 import 'team.dart';
 
 /// Lets a volunteer who was recorded see their own clips.
@@ -61,13 +62,61 @@ class ParticipantService {
   Future<String?> claim({
     required String speakerId,
     required String formNo,
+    required String code,
   }) async {
     if (!Team.signedIn) return 'Sign in first.';
     final sid = normalise(speakerId, 'S');
     final fno = normalise(formNo, 'F');
+    final acc = IdAllocator.tidyCode(code);
     if (!RegExp(r'^S\d{3,}$').hasMatch(sid) ||
         !RegExp(r'^F\d{3,}$').hasMatch(fno)) {
-      return 'Those do not look like the numbers on the form.';
+      return 'Those do not look like the numbers on the form. They are a '
+          'letter and three digits, like S014 and F014.';
+    }
+
+    // The two numbers are two labels on one session, so their digits always
+    // agree. Catching this here gives an exact answer instead of a vague
+    // "does not match" after a round trip to the server.
+    if (sid.substring(1) != fno.substring(1)) {
+      return 'S${sid.substring(1)} and F${fno.substring(1)} belong to two '
+          'different sessions. The digits after the letter are always the '
+          'same pair — check the form again.';
+    }
+
+    // Collectors and admins may read the speaker list, so for them the pair
+    // is checked here. Volunteers cannot read it at all; for them the write
+    // below is the check, and the server refuses a wrong pair.
+    try {
+      final snap = await _speakers.doc(sid).get();
+      if (!snap.exists) {
+        return 'There is no recording session numbered $sid. If it was '
+            'deleted, the number may have been given to someone else.';
+      }
+      final data = snap.data();
+      final stored = data?['consentFormId'] as String?;
+      if (stored != null && stored.isNotEmpty && stored != fno) {
+        return 'Session $sid carries form $stored, not $fno.';
+      }
+      final claimedBy = (data?['claimedBy'] as String?) ?? '';
+      final storedCode = (data?['accessCode'] as String?) ?? '';
+      if (storedCode.isEmpty &&
+          claimedBy.isNotEmpty &&
+          claimedBy != Team.email) {
+        return '$sid is already linked to $claimedBy, and this session has '
+            'no access code to prove otherwise. Ask a collector to unlink it '
+            'on the speaker page.';
+      }
+      if (storedCode.isNotEmpty && storedCode != acc) {
+        return acc.isEmpty
+            ? 'This session needs the 4-character access code written on '
+                'your form.'
+            : 'That access code does not match the one for $sid.';
+      }
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') {
+        debugPrint('pre-check failed: ${e.code}');
+      }
+      // permission-denied is the normal path for a volunteer — carry on.
     }
 
     try {
@@ -75,6 +124,7 @@ class ParticipantService {
         'claimedBy': Team.email,
         'claimedAt': FieldValue.serverTimestamp(),
         'claimProof': fno,
+        'codeProof': acc,
       }, SetOptions(merge: true));
       final p = await SharedPreferences.getInstance();
       final list = await claimed();
@@ -84,10 +134,10 @@ class ParticipantService {
       return null;
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
-        // Either the pair does not match, or someone else already linked it.
-        return 'Those two numbers do not match any recording session. '
-            'Check both numbers on your form — they look like S014 and F014 '
-            'and the digits are the same.';
+        return 'That does not match any recording session. Check the form '
+            'number and the access code on your form.\n\nIf this session has '
+            'no access code and someone else opened it first, a collector has '
+            'to unlink it from the speaker page.';
       }
       debugPrint('claim failed: ${e.code}');
       return 'Could not check right now (${e.code}). Try again in a moment.';

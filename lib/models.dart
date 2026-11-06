@@ -32,6 +32,10 @@ class SpeakerMeta {
   bool adultConfirmed = false;
   String consentFormId = '';
 
+  /// The 4 characters the volunteer needs to look themselves up. Written on
+  /// the paper form; kept here so every screen can show it back to the team.
+  String accessCode = '';
+
   // filled automatically
   String deviceId = '';
   String deviceModel = '';
@@ -61,6 +65,7 @@ class SpeakerMeta {
         'consentToPublishDataset': consentToPublishDataset,
         'adultConfirmed': adultConfirmed,
         'consentFormId': consentFormId,
+        'accessCode': accessCode,
         'deviceId': deviceId,
         'deviceModel': deviceModel,
         'androidVersion': androidVersion,
@@ -95,6 +100,7 @@ class SpeakerMeta {
       ..consentToPublishDataset = m['consentToPublishDataset'] as bool? ?? false
       ..adultConfirmed = m['adultConfirmed'] as bool? ?? false
       ..consentFormId = m['consentFormId'] as String? ?? ''
+      ..accessCode = m['accessCode'] as String? ?? ''
       ..deviceId = m['deviceId'] as String? ?? ''
       ..deviceModel = m['deviceModel'] as String? ?? ''
       ..androidVersion = m['androidVersion'] as String? ?? ''
