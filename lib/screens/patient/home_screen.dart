@@ -5,6 +5,7 @@ import '../../app/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/speech_service.dart';
 import '../../widgets/common.dart';
+import '../collectors_tab.dart';
 import '../home_shell.dart';
 
 /// The patient's start page: quick replies on top, then every feature as a
@@ -25,6 +26,9 @@ class PatientHome extends StatelessWidget {
         const SizedBox(height: 2),
         Text(tr('home_sub'), style: Theme.of(context).textTheme.bodyLarge),
         const SizedBox(height: 16),
+        // Collectors first: clips sitting on this phone are clips the
+        // dataset does not have.
+        const MyUploadWarning(),
         const QuickReplies(),
         const SizedBox(height: 8),
         _SpeakHero(onTap: () => onOpen(Dest.speak)),
@@ -56,7 +60,6 @@ class PatientHome extends StatelessWidget {
               title: tr('menu_personalise'),
               subtitle: tr('personalise_desc'),
               color: const Color(0xFF7B5EA7),
-              soon: true,
               onTap: () => onOpen(Dest.personalise),
             ),
             FeatureTile(
@@ -118,7 +121,6 @@ class _SpeakHero extends StatelessWidget {
                                 color: Colors.white,
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800)),
-                        const ComingSoonChip(),
                       ],
                     ),
                     const SizedBox(height: 6),

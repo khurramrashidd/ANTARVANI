@@ -1,4 +1,4 @@
-ANTARVANI setup  2026-11-05 15:19:52.849800
+ANTARVANI setup  2026-11-17 13:51:38.633181
 Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 1. Project folder ===========================================
@@ -56,7 +56,9 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 12. Android manifest and Gradle =============================
   [OK]    AndroidManifest already correct
-  [OK]    minSdk = 24
+  [OK]    proguard-rules.pro keeps TensorFlow Lite
+  [OK]    gradle.properties sets kotlin.jvm.target.validation.mode
+  [OK]    minSdk = 26
           Android Gradle Plugin 9.1
   [OK]    compileSdk = 36
   [OK]    android/build.gradle.kts already correct (compileSdk 36)

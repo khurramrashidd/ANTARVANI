@@ -17,7 +17,7 @@ const projectId = 'antarvaani-the-voice';
 const ownerEmail = 'khurramrashid6893@gmail.com';
 const masterEmail = 'khurramrashid0786@gmail.com';
 const appLabel = 'ANTARVANI';
-const minSdk = 24;
+const minSdk = 26;
 const dbLocation = 'asia-south1';
 const corpusFolderId = '1Hw76NlkEjJdCsD40TY-YhA4qBIlGVqex';
 
@@ -328,6 +328,19 @@ service cloud.firestore {
     match /config/{id} {
       allow read:  if signedIn();
       allow write: if isMaster();
+    }
+
+    // The trained recognition model for each language, and the languages
+    // themselves. Every signed-in phone reads them (patients run the model);
+    // only admins publish. A model row only names a file and its checksum,
+    // and the app refuses any download that does not match the checksum.
+    match /models/{lang} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
+    }
+    match /languages/{code} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
     }
 
     // Shared speaker counter: S001, S002 ... for every collector.
@@ -887,6 +900,16 @@ void fixAndroidFiles() {
       '<uses-permission android:name="android.permission.INTERNET" />',
       '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />',
       '<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
+      // Uploading after the app is closed: a foreground service, its
+      // notification, the wake lock that keeps the transfer alive, and the
+      // battery-optimisation exemption without which Realme, Redmi, Oppo and
+      // Vivo stop the service within minutes.
+      '<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />',
+      '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />',
+      '<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />',
+      '<uses-permission android:name="android.permission.WAKE_LOCK" />',
+      '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />',
+      '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />',
       '<uses-feature android:name="android.hardware.camera" android:required="true" />',
     ];
     for (final p in perms) {
@@ -928,7 +951,37 @@ void fixAndroidFiles() {
   var s = g.readAsStringSync();
   final before = s;
 
-  // ---- minSdk: Firebase and ML Kit need 24.
+  // ---- R8 rules. The TensorFlow Lite library refers to an optional GPU
+  // class that is not shipped; without this a release build stops with
+  // "Missing class org.tensorflow.lite.gpu...". Flutter picks this file up
+  // by itself.
+  final pro = File('android/app/proguard-rules.pro');
+  const proWant = '# written by setup - TensorFlow Lite (recognition model)\n'
+      '-dontwarn org.tensorflow.lite.gpu.**\n'
+      '-keep class org.tensorflow.lite.** { *; }\n';
+  final proHave = pro.existsSync() ? pro.readAsStringSync() : '';
+  if (proHave.contains('org.tensorflow.lite')) {
+    ok('proguard-rules.pro keeps TensorFlow Lite');
+  } else {
+    pro.writeAsStringSync(proHave.isEmpty ? proWant : '$proHave\n$proWant');
+    fixed('proguard-rules.pro: TensorFlow Lite rules added');
+  }
+
+  // ---- If a plugin's Java and Kotlin halves still disagree on some other
+  // machine's JDK, this turns the hard failure into a warning rather than
+  // stopping the build. The override above is what normally prevents it.
+  final gp = File('android/gradle.properties');
+  const gpKey = 'kotlin.jvm.target.validation.mode';
+  final gpHave = gp.existsSync() ? gp.readAsStringSync() : '';
+  if (gpHave.contains(gpKey)) {
+    ok('gradle.properties sets $gpKey');
+  } else {
+    final sep = gpHave.isEmpty || gpHave.endsWith('\n') ? '' : '\n';
+    gp.writeAsStringSync('$gpHave$sep$gpKey=warning\n');
+    fixed('gradle.properties: $gpKey=warning');
+  }
+
+  // ---- minSdk: TensorFlow Lite needs 26 (Android 8).
   final reMin = RegExp(r'(minSdk(?:Version)?)(\s*=\s*|\s+)([^\s\r\n]+)');
   final mMin = reMin.firstMatch(s);
   if (mMin == null) {
@@ -939,7 +992,7 @@ void fixAndroidFiles() {
       ok('minSdk = $v');
     } else {
       s = s.replaceFirst(reMin, 'minSdk${mMin.group(2)}$minSdk');
-      fixed('minSdk ${mMin.group(3)} -> $minSdk (needed by Firebase and ML Kit)');
+      fixed('minSdk ${mMin.group(3)} -> $minSdk (needed by TensorFlow Lite)');
     }
   }
 
@@ -1022,6 +1075,7 @@ void _fixPluginCompileSdk(int want) {
 // require 34 or later. Nothing in android/app can change that, so raise it
 // for every module here.
 ext.ANTARVANI_SDK = $want
+ext.ANTARVANI_JVM_FIX = ['tflite_flutter']
 subprojects {
     def raiseCompileSdk = {
         def androidExt = project.extensions.findByName('android')
@@ -1029,6 +1083,15 @@ subprojects {
             try {
                 androidExt.compileSdk = ANTARVANI_SDK
             } catch (Throwable ignored) {
+            }
+            // See the Kotlin DSL version of this block: a plugin whose javac
+            // level disagrees with Flutter's built-in Kotlin will not build.
+            if (ANTARVANI_JVM_FIX.contains(project.name)) {
+                try {
+                    androidExt.compileOptions.sourceCompatibility = JavaVersion.current()
+                    androidExt.compileOptions.targetCompatibility = JavaVersion.current()
+                } catch (Throwable ignored) {
+                }
             }
         }
     }
@@ -1076,8 +1139,20 @@ allprojects {
 // for every module here. Remove this block and the build fails with
 // "requires ... compile against version 34 or later of the Android APIs".
 val ANTARVANI_SDK = $want
+
+// A plugin that does not carry its own Kotlin plugin is compiled by Flutter's
+// built-in Kotlin, which targets the JVM that is running Gradle — 21 on a
+// current Flutter. tflite_flutter's own build file still asks javac for 11,
+// and Kotlin refuses to build a module whose two halves disagree:
+//   Inconsistent JVM-target compatibility ... (11) and ... (21)
+// Nothing in android/app can change another module's build file, so the
+// module's Java level is raised here to whatever Kotlin is using. Only the
+// modules named below are touched: raising one whose Kotlin target is
+// deliberately low would cause the same clash the other way round.
+val ANTARVANI_JVM_FIX = setOf("tflite_flutter")
+
 subprojects {
-    val raiseCompileSdk = {
+    val fixModule = {
         val androidExt = extensions.findByName("android")
         if (androidExt != null) {
             runCatching {
@@ -1085,9 +1160,38 @@ subprojects {
                     .first { it.name == "setCompileSdk" && it.parameterTypes.size == 1 }
                     .invoke(androidExt, ANTARVANI_SDK)
             }
+            if (ANTARVANI_JVM_FIX.contains(project.name)) {
+                runCatching {
+                    val opts = androidExt.javaClass.methods
+                        .first {
+                            it.name == "getCompileOptions" && it.parameterTypes.isEmpty()
+                        }
+                        .invoke(androidExt)!!
+                    // AGP has spelled these setters differently over the
+                    // years (JavaVersion, String, Object), so every one-argument
+                    // overload is tried with both forms until one takes.
+                    val here = JavaVersion.current()
+                    for (setter in listOf("setSourceCompatibility", "setTargetCompatibility")) {
+                        var done = false
+                        for (m in opts.javaClass.methods) {
+                            if (done || m.name != setter || m.parameterTypes.size != 1) continue
+                            for (arg in listOf<Any>(here, here.toString())) {
+                                if (!done && runCatching { m.invoke(opts, arg) }.isSuccess) {
+                                    done = true
+                                }
+                            }
+                        }
+                        if (!done) {
+                            logger.lifecycle(
+                                "ANTARVANI: could not raise the Java level of " +
+                                    project.name + " (" + setter + ")")
+                        }
+                    }
+                }
+            }
         }
     }
-    if (state.executed) raiseCompileSdk() else afterEvaluate { raiseCompileSdk() }
+    if (state.executed) fixModule() else afterEvaluate { fixModule() }
 }
 
 val newBuildDir: Directory =

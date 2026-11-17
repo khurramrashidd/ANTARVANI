@@ -24,6 +24,8 @@ Map<String, String>? rowFor(String key) => _s[key];
 /// The phrase's meaning in the current language. Hindi needs none: the
 /// phrase itself is Hindi.
 String phraseMeaning(Phrase p) {
+  // The Marathi and romanised glosses below belong to the Hindi set only.
+  if (!PhraseBook.isHindi) return p.english.isEmpty ? p.roman : p.english;
   switch (AppSettings.instance.lang) {
     case 'mr':
       return _marathi[p.id] ?? p.english;
@@ -468,5 +470,110 @@ const Map<String, Map<String, String>> _s = {
     'en': 'Ask the master admin to add you to the team.',
     'hi': 'टीम में जुड़ने के लिए मास्टर एडमिन से कहें।',
     'mr': 'टीममध्ये सामील होण्यासाठी मास्टर प्रशासकाला सांगा.',
+  },
+
+  // ------------------------------------------------- recognition (model)
+  'speak_no_model': {
+    'en': 'No recognition model has been published for {lang} yet. Until then, use the phrase board.',
+    'hi': '{lang} के लिए पहचान मॉडल अभी जारी नहीं हुआ है। तब तक वाक्य बोर्ड का उपयोग करें।',
+    'mr': '{lang} साठी ओळख मॉडेल अजून प्रकाशित झालेले नाही. तोपर्यंत वाक्य फलक वापरा.',
+  },
+  'speak_downloading': {
+    'en': 'Downloading the recognition model… {p}%',
+    'hi': 'पहचान मॉडल डाउनलोड हो रहा है… {p}%',
+    'mr': 'ओळख मॉडेल डाउनलोड होत आहे… {p}%',
+  },
+  'speak_model_error': {
+    'en': 'The model could not be downloaded. {e}',
+    'hi': 'मॉडल डाउनलोड नहीं हो सका। {e}',
+    'mr': 'मॉडेल डाउनलोड होऊ शकले नाही. {e}',
+  },
+  'speak_retry': {'en': 'Try again', 'hi': 'फिर कोशिश करें', 'mr': 'पुन्हा प्रयत्न करा'},
+  'speak_get_ready': {'en': 'Get ready…', 'hi': 'तैयार हो जाइए…', 'mr': 'तयार व्हा…'},
+  'speak_now': {
+    'en': 'Mouth the phrase now',
+    'hi': 'अब बिना आवाज़ वाक्य बोलें',
+    'mr': 'आता आवाजाशिवाय वाक्य बोला',
+  },
+  'speak_reading': {'en': 'Reading your lips…', 'hi': 'आपके होंठ पढ़ रहे हैं…', 'mr': 'तुमचे ओठ वाचत आहे…'},
+  'speak_no_face': {
+    'en': 'I could not see your face clearly. Hold the phone at eye level in good light and try again.',
+    'hi': 'आपका चेहरा साफ़ नहीं दिखा। फ़ोन आँखों के स्तर पर, अच्छी रोशनी में रखकर फिर कोशिश करें।',
+    'mr': 'तुमचा चेहरा स्पष्ट दिसला नाही. फोन डोळ्यांच्या पातळीवर, चांगल्या प्रकाशात धरून पुन्हा प्रयत्न करा.',
+  },
+  'speak_failed': {
+    'en': 'Something went wrong while reading. Try again.',
+    'hi': 'पढ़ते समय कुछ गड़बड़ हुई। फिर कोशिश करें।',
+    'mr': 'वाचताना काहीतरी चूक झाली. पुन्हा प्रयत्न करा.',
+  },
+  'speak_unsure': {
+    'en': 'I am not sure. Did you mean:',
+    'hi': 'मुझे पक्का नहीं है। क्या आपका मतलब था:',
+    'mr': 'मला खात्री नाही. तुम्हाला असे म्हणायचे होते का:',
+  },
+  'speak_alt': {
+    'en': 'Not what you meant?',
+    'hi': 'यह नहीं कहना था?',
+    'mr': 'असे म्हणायचे नव्हते?',
+  },
+  'speak_again': {'en': 'Speak again', 'hi': 'फिर बोलें', 'mr': 'पुन्हा बोला'},
+  'speak_model_info': {
+    'en': '{lang} model, version {v}',
+    'hi': '{lang} मॉडल, संस्करण {v}',
+    'mr': '{lang} मॉडेल, आवृत्ती {v}',
+  },
+  'speak_camera_error': {
+    'en': 'The camera could not be opened. Allow camera access in the phone settings.',
+    'hi': 'कैमरा नहीं खुल सका। फ़ोन की सेटिंग में कैमरे की अनुमति दें।',
+    'mr': 'कॅमेरा उघडता आला नाही. फोनच्या सेटिंगमध्ये कॅमेऱ्याची परवानगी द्या.',
+  },
+  'speak_updating_personal': {
+    'en': 'Updating your personal samples for the new model…',
+    'hi': 'नए मॉडल के लिए आपके निजी नमूने अपडेट हो रहे हैं…',
+    'mr': 'नवीन मॉडेलसाठी तुमचे वैयक्तिक नमुने अद्ययावत होत आहेत…',
+  },
+  'speak_personalised': {
+    'en': 'Personalised with {n} of your samples',
+    'hi': 'आपके {n} नमूनों से निजीकृत',
+    'mr': 'तुमच्या {n} नमुन्यांनी वैयक्तिकृत',
+  },
+  'pers_need_model': {
+    'en': 'Personalising needs the recognition model first.',
+    'hi': 'निजीकरण के लिए पहले पहचान मॉडल चाहिए।',
+    'mr': 'वैयक्तिकरणासाठी आधी ओळख मॉडेल हवे.',
+  },
+  'pers_samples': {'en': '{n} of {m} samples', 'hi': '{m} में से {n} नमूने', 'mr': '{m} पैकी {n} नमुने'},
+  'pers_record_title': {
+    'en': 'Mouth this phrase silently',
+    'hi': 'यह वाक्य बिना आवाज़ बोलें',
+    'mr': 'हे वाक्य आवाजाशिवाय बोला',
+  },
+  'pers_record': {'en': 'Record a sample', 'hi': 'नमूना रिकॉर्ड करें', 'mr': 'नमुना रेकॉर्ड करा'},
+  'pers_saved': {
+    'en': 'Saved. On its own, the model heard: {p}',
+    'hi': 'सहेजा गया। मॉडल ने अपने आप सुना: {p}',
+    'mr': 'जतन केले. मॉडेलने स्वतःहून ऐकले: {p}',
+  },
+  'pers_clear': {'en': 'Delete my samples', 'hi': 'मेरे नमूने हटाएँ', 'mr': 'माझे नमुने हटवा'},
+  'pers_clear_confirm': {
+    'en': 'Delete every sample you recorded on this phone?',
+    'hi': 'इस फ़ोन पर रिकॉर्ड किए सभी नमूने हटाएँ?',
+    'mr': 'या फोनवर रेकॉर्ड केलेले सर्व नमुने हटवायचे?',
+  },
+  'pers_clear_one': {
+    'en': 'Delete the samples of this phrase',
+    'hi': 'इस वाक्य के नमूने हटाएँ',
+    'mr': 'या वाक्याचे नमुने हटवा',
+  },
+  'pers_private': {
+    'en': 'Your samples stay on this phone. Only the movement of your lips is kept: no sound, no face.',
+    'hi': 'आपके नमूने इसी फ़ोन पर रहते हैं। सिर्फ़ होंठों की हरकत रखी जाती है: न आवाज़, न चेहरा।',
+    'mr': 'तुमचे नमुने याच फोनवर राहतात. फक्त ओठांची हालचाल ठेवली जाते: आवाज नाही, चेहरा नाही.',
+  },
+  'phrase_language': {'en': 'Phrase language', 'hi': 'वाक्यों की भाषा', 'mr': 'वाक्यांची भाषा'},
+  'phrase_language_hint': {
+    'en': 'The language you mouth and the phone speaks.',
+    'hi': 'जिस भाषा में आप बोलते हैं और फ़ोन बोलता है।',
+    'mr': 'ज्या भाषेत तुम्ही बोलता आणि फोन बोलतो.',
   },
 };

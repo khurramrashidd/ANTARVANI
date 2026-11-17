@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
+import '../phrases.dart';
 import 'team.dart';
 
 /// Speaker IDs and consent-form numbers from ONE shared counter in Firestore.
@@ -89,6 +90,7 @@ class IdAllocator {
         tx.set(_speakers.doc(ids.speakerId), {
           'speakerId': ids.speakerId,
           'consentFormId': ids.formNo,
+          'lang': PhraseBook.code,
           // Written on the paper form by hand. Without it, "both numbers"
           // proved nothing: F014 is just S014 with the letter changed, so
           // anyone who saw one could work out the other.

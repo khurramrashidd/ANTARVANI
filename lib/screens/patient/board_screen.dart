@@ -122,7 +122,7 @@ class _PhraseCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => SpeechService.instance
-            .say(phrase.devanagari, lang: 'hi-IN', source: 'board'),
+            .say(phrase.devanagari, lang: PhraseBook.current.tts, source: 'board'),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(

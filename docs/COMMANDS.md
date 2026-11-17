@@ -55,7 +55,7 @@ not compiled.
 
 ```gradle
 defaultConfig {
-    minSdkVersion 23
+    minSdkVersion 26
     multiDexEnabled true
 }
 ```

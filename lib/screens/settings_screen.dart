@@ -4,8 +4,10 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../app/l10n.dart';
 import '../app/settings.dart';
 import '../services/auth_service.dart';
+import '../services/language_service.dart';
 import '../services/weather_service.dart';
 import '../widgets/common.dart';
+import 'background_upload_screen.dart';
 import 'home_shell.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -68,6 +70,44 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               ),
+              if (LanguageService.instance.languages.length > 1) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.record_voice_over_outlined),
+                  title: Text(tr('phrase_language')),
+                  subtitle: Text(tr('phrase_language_hint')),
+                  trailing: DropdownButton<String>(
+                    value: LanguageService.instance.code,
+                    underline: const SizedBox.shrink(),
+                    items: [
+                      for (final l in LanguageService.instance.languages)
+                        DropdownMenuItem(value: l.code, child: Text(l.name)),
+                    ],
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      final why = await LanguageService.instance.use(v);
+                      if (why != null && context.mounted) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(content: Text(why)));
+                      }
+                    },
+                  ),
+                ),
+              ],
+              if (AuthService.instance.profile?.isTeam ?? false) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.autorenew),
+                  title: const Text('Background upload'),
+                  subtitle: const Text(
+                      'Keep sending clips to Drive after the app is closed'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => const BackgroundUploadScreen()),
+                  ),
+                ),
+              ],
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.my_location),

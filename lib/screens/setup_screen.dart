@@ -272,6 +272,25 @@ class _SetupScreenState extends State<SetupScreen> {
           demo: _demo,
           onChanged: (v) => setState(() => _demo = v),
         ),
+        // Which phrase list and Drive folder this session goes to.
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.translate, size: 18, color: Brand.indigo),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Recording ${PhraseBook.current.name} · '
+                  '${kPhrases.length} phrases'
+                  '${PhraseBook.isHindi ? '' : ' · folder lang_${PhraseBook.code}'}'
+                  '  (change in Corpus › Languages)',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ),
         if (!_demo) ...[
           const _Checklist(),
           const _NextIdCard(),

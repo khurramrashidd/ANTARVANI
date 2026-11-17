@@ -5,8 +5,11 @@ import 'package:silent_voice_recorder/models.dart';
 import 'package:silent_voice_recorder/phrases.dart';
 import 'package:silent_voice_recorder/services/drive_uploader.dart';
 import 'package:silent_voice_recorder/services/id_allocator.dart';
+import 'package:silent_voice_recorder/services/model_service.dart';
 import 'package:silent_voice_recorder/services/participant_service.dart';
 import 'package:silent_voice_recorder/services/team.dart';
+import 'package:silent_voice_recorder/screens/collectors_tab.dart';
+import 'package:silent_voice_recorder/screens/dashboard_screen.dart';
 
 void main() {
   test('phrase set is frozen at 20 and correctly numbered', () {
@@ -216,5 +219,208 @@ void main() {
     expect(member.isAdmin, isFalse);
     const patient = AppUser(email: 'p@b.c', name: 'P', role: Roles.patient);
     expect(patient.isTeam, isFalse);
+  });
+
+  // ------------------------------------------------ languages and models
+  test('Hindi is the built-in language and the default', () {
+    expect(PhraseBook.code, 'hi');
+    expect(PhraseBook.current.tts, 'hi-IN');
+    expect(identical(kPhrases, kHindiPhrases), isTrue);
+  });
+
+  test('a language file is accepted as rows or as maps', () {
+    final (a, whyA) = Language.parse({
+      'code': 'MR',
+      'name': 'Marathi',
+      'tts': 'mr-IN',
+      'phrases': [
+        ['P01', 'मला पाणी हवे आहे', 'mala paani have aahe', 'I need water'],
+        ['P02', 'दुखत आहे', 'dukhat aahe', "I'm in pain"],
+      ],
+    });
+    expect(whyA, isNull);
+    expect(a!.code, 'mr');
+    expect(a.phrases.length, 2);
+    final (b, _) = Language.parse(a.toMap());
+    expect(b!.phrases[1].devanagari, 'दुखत आहे');
+  });
+
+  test('a language file with gaps in the numbering is refused', () {
+    final (lang, why) = Language.parse({
+      'code': 'mr',
+      'phrases': [
+        ['P01', 'a'],
+        ['P03', 'b'],
+      ],
+    });
+    expect(lang, isNull);
+    expect(why, contains('P02'));
+  });
+
+  test('switching language switches the phrase list', () {
+    final (mr, _) = Language.parse({
+      'code': 'mr',
+      'phrases': [
+        ['P01', 'a'],
+        ['P02', 'b'],
+        ['P03', 'c'],
+      ],
+    });
+    PhraseBook.all['mr'] = mr!;
+    PhraseBook.code = 'mr';
+    expect(kPhrases.length, 3);
+    PhraseBook.code = 'hi';
+    PhraseBook.all.remove('mr');
+    expect(kPhrases.length, 20);
+  });
+
+  Map<String, dynamic> card() => {
+        'lang': 'hi',
+        'name': 'Hindi',
+        'tts': 'hi-IN',
+        'version': 3,
+        'file': 'antarvani_hi_v3.tflite',
+        'sha256': 'a' * 64,
+        'sizeBytes': 3559012,
+        'frames': 48,
+        'size': 88,
+        'fps': 16.0,
+        'labels': [
+          {'id': 'P01', 'text': 'मुझे पानी चाहिए', 'roman': '', 'english': ''},
+          {'id': 'P02', 'text': 'दर्द हो रहा है', 'roman': '', 'english': ''},
+        ],
+        'speakers': 12,
+        'clips': 240,
+        'top1': 0.5,
+        'top3': 0.8,
+      };
+
+  test('the model file is found next to its card', () {
+    final (c, why) = ModelCard.parse(card(),
+        cardUrl: 'https://github.com/u/r/releases/download/model-hi-v3/'
+            'antarvani_hi_v3.json');
+    expect(why, isNull);
+    expect(c!.url,
+        'https://github.com/u/r/releases/download/model-hi-v3/antarvani_hi_v3.tflite');
+    expect(c.version, 3);
+    expect(c.labels.length, 2);
+    expect(c.windowSeconds, 3.0);
+  });
+
+  test('a model card survives being stored and read back', () {
+    final (c, _) =
+        ModelCard.parse(card(), cardUrl: 'https://example.com/m/card.json');
+    final (again, why) = ModelCard.parse(c!.toMap());
+    expect(why, isNull);
+    expect(again!.url, c.url);
+    expect(again.sha256, c.sha256);
+  });
+
+  test('a model card without a checksum or over http is refused', () {
+    final noSum = card()..remove('sha256');
+    expect(ModelCard.parse(noSum, cardUrl: 'https://x.org/a/c.json').$1, isNull);
+    expect(ModelCard.parse(card(), cardUrl: 'http://x.org/a/c.json').$1, isNull);
+  });
+
+  test('language folders in Drive are named lang_<code>', () {
+    expect(DriveUploader.langFolderName('mr'), 'lang_mr');
+  });
+
+  // ------------------------------------------------ collector dashboard
+  ClipView clip({
+    required String speaker,
+    required String phrase,
+    required String who,
+    bool uploaded = true,
+    int daysAgo = 0,
+    String status = 'ok',
+    String device = 'dev1',
+    String qc = 'pass',
+  }) {
+    final t = DateTime.now().toUtc().subtract(Duration(days: daysAgo));
+    return ClipView({
+      'speakerId': speaker,
+      'phraseId': phrase,
+      'take': 1,
+      'status': status,
+      'qcVerdict': qc,
+      'uploaded': uploaded,
+      'collectorEmail': '$who@example.com',
+      'collectorName': who,
+      'deviceId': device,
+      'capturedUtc': t.toIso8601String(),
+      'qcFaceScore': 0.9,
+      'qcMouthWidth': 0.2,
+    }, '${speaker}_${phrase}_t01');
+  }
+
+  Stats statsOf(List<ClipView> clips, [List<SpeakerView> sp = const []]) =>
+      Stats(clips, sp);
+
+  test('clips are grouped by the person who recorded them', () {
+    final s = statsOf([
+      clip(speaker: 'S001', phrase: 'P01', who: 'kinza'),
+      clip(speaker: 'S001', phrase: 'P02', who: 'kinza', uploaded: false),
+      clip(speaker: 'S002', phrase: 'P01', who: 'prapti'),
+    ]);
+    final rows = collectorsOf(s);
+    expect(rows.length, 2);
+    // whoever still owes uploads comes first
+    expect(rows.first.name, 'kinza');
+    expect(rows.first.total, 2);
+    expect(rows.first.uploaded, 1);
+    expect(rows.first.waiting.length, 1);
+    expect(rows.first.speakerIds, {'S001'});
+    expect(rows.last.waiting, isEmpty);
+  });
+
+  test('waiting clips are listed under the speaker they belong to', () {
+    final s = statsOf([
+      clip(speaker: 'S001', phrase: 'P01', who: 'kinza', uploaded: false),
+      clip(speaker: 'S001', phrase: 'P02', who: 'kinza', uploaded: false),
+      clip(speaker: 'S004', phrase: 'P01', who: 'kinza', uploaded: false),
+      clip(speaker: 'S004', phrase: 'P02', who: 'kinza'),
+    ]);
+    final r = collectorsOf(s).single;
+    expect(r.waitingBySpeaker.keys.toSet(), {'S001', 'S004'});
+    expect(r.waitingBySpeaker['S001']!.length, 2);
+    expect(r.waitingBySpeaker['S004']!.length, 1);
+  });
+
+  test('a clip is only called stuck after a day on the phone', () {
+    final fresh = collectorsOf(statsOf(
+        [clip(speaker: 'S001', phrase: 'P01', who: 'k', uploaded: false)]));
+    expect(fresh.single.isStuck, isFalse);
+
+    final old = collectorsOf(statsOf([
+      clip(speaker: 'S001', phrase: 'P01', who: 'k', uploaded: false, daysAgo: 3)
+    ]));
+    expect(old.single.isStuck, isTrue);
+    expect(old.single.days.length, 1);
+  });
+
+  test('rejected clips are not counted against a collector', () {
+    final s = statsOf([
+      clip(speaker: 'S001', phrase: 'P01', who: 'k'),
+      clip(
+          speaker: 'S001',
+          phrase: 'P02',
+          who: 'k',
+          uploaded: false,
+          status: 'rejected'),
+    ]);
+    final r = collectorsOf(s).single;
+    expect(r.total, 1);
+    expect(r.waiting, isEmpty);
+  });
+
+  test('framing is averaged per collector', () {
+    final s = statsOf([
+      clip(speaker: 'S001', phrase: 'P01', who: 'k'),
+      clip(speaker: 'S001', phrase: 'P02', who: 'k', qc: 'warn'),
+    ]);
+    final r = collectorsOf(s).single;
+    expect(r.flagged, 1);
+    expect(r.avgFace, closeTo(0.9, 0.001));
   });
 }

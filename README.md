@@ -188,3 +188,10 @@ Sidebar header: photo, role, live date and time, city and weather
 
 ## Run
 From this folder: `setup` — then `flutter run`. See CHANGELOG.md.
+
+## Recognition model
+
+The model is trained in Colab (`pipeline/ANTARVANI_train.ipynb`, Run all) and
+published to the phones by pasting one link in the app. No APK rebuild.
+Full steps: `docs/MODEL_PIPELINE.md`. Adding a language:
+`pipeline/languages/README.md`.

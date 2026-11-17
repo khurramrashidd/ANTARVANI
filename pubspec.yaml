@@ -27,6 +27,9 @@ dependencies:
   googleapis: ^13.2.0
   extension_google_sign_in_as_googleapis_auth: ^2.0.12
 
+  # uploads that carry on after the app is closed
+  flutter_background_service: ^5.0.5
+
   # plumbing
   path_provider: ^2.1.4
   permission_handler: ^11.3.1
@@ -34,6 +37,10 @@ dependencies:
   package_info_plus: ^8.0.2
   connectivity_plus: ^6.0.5
   shared_preferences: ^2.3.2
+
+  # recognition model: runs on the phone, downloaded and checksum-verified
+  tflite_flutter: '>=0.11.0 <0.13.0'
+  crypto: ^3.0.3
 
   # patient side
   flutter_tts: ^4.2.0
@@ -63,4 +70,4 @@ flutter_launcher_icons:
   image_path: assets/logo/antarvani_icon_1024.png
   adaptive_icon_background: assets/logo/antarvani_icon_background.png
   adaptive_icon_foreground: assets/logo/antarvani_icon_foreground.png
-  min_sdk_android: 24
+  min_sdk_android: 26

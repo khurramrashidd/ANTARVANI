@@ -1,0 +1,10 @@
+{
+  "code": "mr",
+  "name": "Marathi",
+  "tts": "mr-IN",
+  "phrases": [
+    ["P01", "मला पाणी हवे आहे", "mala paani have aahe", "I need water"],
+    ["P02", "दुखत आहे", "dukhat aahe", "I'm in pain"],
+    ["P03", "डॉक्टरांना बोलवा", "doctorana bolva", "Call the doctor"]
+  ]
+}

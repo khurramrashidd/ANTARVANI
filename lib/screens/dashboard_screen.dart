@@ -13,6 +13,8 @@ import '../services/release_service.dart';
 import '../services/sync_service.dart';
 import '../services/team.dart';
 import '../storage.dart';
+import 'collectors_tab.dart';
+import 'model_admin.dart';
 import 'record_screen.dart';
 import 'speaker_edit_screen.dart';
 
@@ -34,6 +36,10 @@ class ClipView {
   final String collectorName;
   final String? rejectedReason;
   final String capturedUtc;
+  final String uploadedUtc;
+  final String deviceId;
+  final double qcFaceScore; // fraction of preview frames with a face
+  final double qcMouthWidth; // mouth width as a fraction of frame width
 
   ClipView(Map<String, dynamic> m, this.docId)
       : speakerId = m['speakerId'] as String? ?? '',
@@ -50,12 +56,22 @@ class ClipView {
         collectorEmail = m['collectorEmail'] as String?,
         collectorName = m['collectorName'] as String? ?? '—',
         rejectedReason = m['rejectedReason'] as String?,
-        capturedUtc = m['capturedUtc'] as String? ?? '';
+        capturedUtc = m['capturedUtc'] as String? ?? '',
+        uploadedUtc = m['uploadedUtc'] as String? ?? '',
+        deviceId = m['deviceId'] as String? ?? '',
+        qcFaceScore = (m['qcFaceScore'] as num?)?.toDouble() ?? -1.0,
+        qcMouthWidth = (m['qcMouthWidth'] as num?)?.toDouble() ?? -1.0;
 
   bool get live => status == 'ok';
 
   /// Where it sits in Drive: "P03/S014_P03_t01.mp4".
   String get drivePath => DriveUploader.pathOf(phraseId, fileName);
+
+  /// When it was recorded, in the reader's own time zone.
+  DateTime? get capturedAt => DateTime.tryParse(capturedUtc)?.toLocal();
+
+  /// When it reached Drive, in the reader's own time zone.
+  DateTime? get uploadedAt => DateTime.tryParse(uploadedUtc)?.toLocal();
 
   /// Local calendar day, for the per-day breakdown. '' when unknown.
   String get day {
@@ -197,12 +213,22 @@ class DashboardScreen extends StatelessWidget {
             if (!clipSnap.hasData || !spSnap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
+            // One language at a time: rows without a language are the
+            // Hindi sessions recorded before languages existed.
+            bool here(Map<String, dynamic> m) =>
+                (m['lang'] as String? ?? 'hi') == PhraseBook.code;
             final stats = Stats(
-              clipSnap.data!.docs.map((d) => ClipView(d.data(), d.id)).toList(),
-              spSnap.data!.docs.map((d) => SpeakerView(d.id, d.data())).toList(),
+              clipSnap.data!.docs
+                  .where((d) => here(d.data()))
+                  .map((d) => ClipView(d.data(), d.id))
+                  .toList(),
+              spSnap.data!.docs
+                  .where((d) => here(d.data()))
+                  .map((d) => SpeakerView(d.id, d.data()))
+                  .toList(),
             );
             return DefaultTabController(
-              length: 4,
+              length: 5,
               child: Column(
                 children: [
                   const TabBar(
@@ -210,6 +236,7 @@ class DashboardScreen extends StatelessWidget {
                     tabAlignment: TabAlignment.start,
                     tabs: [
                       Tab(text: 'Overview'),
+                      Tab(text: 'Collectors'),
                       Tab(text: 'Speakers'),
                       Tab(text: 'Breakdown'),
                       Tab(text: 'Team'),
@@ -219,6 +246,7 @@ class DashboardScreen extends StatelessWidget {
                     child: TabBarView(
                       children: [
                         _OverviewTab(stats: stats),
+                        CollectorsTab(stats: stats),
                         _SpeakersTab(stats: stats),
                         _BreakdownTab(stats: stats),
                         _TeamTab(stats: stats),
@@ -248,6 +276,7 @@ class _OverviewTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
+        StuckClipsAlert(stats: stats),
         Row(
           children: [
             _Stat(
@@ -294,6 +323,8 @@ class _OverviewTab extends StatelessWidget {
         _DeleteByNumberCard(stats: stats),
         const _StrandedFilesCard(),
         if (me?.isMaster ?? false) const _PublishUpdateCard(),
+        const LanguagesCard(),
+        if (me?.isAdmin ?? false) const PublishModelCard(),
         const SizedBox(height: 12),
         _ManifestButton(stats: stats),
         if (me?.isAdmin ?? false) ...[
@@ -1252,9 +1283,15 @@ class _HealthCardState extends State<_HealthCard> {
                   color: s.waiting == 0 ? const Color(0xFF2E7D32) : Brand.amber,
                   title: s.waiting == 0
                       ? 'Everything is in Drive'
-                      : '${s.waiting} clips still to upload '
-                          '(${sync.pendingCount} queued on this phone)',
-                  subtitle: sync.status,
+                      : '${s.waiting} clip(s) are not in Drive yet',
+                  subtitle: s.waiting == 0
+                      ? sync.status
+                      : sync.pendingCount == 0
+                          ? 'None of them are on this phone — open '
+                              'Collectors to see whose they are'
+                          : '${sync.pendingCount} of them are on this phone '
+                              '(${sync.status}); the rest are on other '
+                              'phones — see Collectors',
                 ),
                 const Divider(height: 20),
                 _Line(

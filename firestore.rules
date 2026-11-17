@@ -41,6 +41,19 @@ service cloud.firestore {
       allow write: if isMaster();
     }
 
+    // The trained recognition model for each language, and the languages
+    // themselves. Every signed-in phone reads them (patients run the model);
+    // only admins publish. A model row only names a file and its checksum,
+    // and the app refuses any download that does not match the checksum.
+    match /models/{lang} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
+    }
+    match /languages/{code} {
+      allow read:  if signedIn();
+      allow write: if isAdmin();
+    }
+
     // Shared speaker counter: S001, S002 ... for every collector.
     match /counters/{id} {
       allow read, write: if isMember();

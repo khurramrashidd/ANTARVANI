@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
+import '../phrases.dart';
 import '../storage.dart';
 import 'auth_service.dart';
 import 'drive_uploader.dart';
@@ -227,6 +228,8 @@ class SyncService extends ChangeNotifier {
     meta.deviceId = deviceId;
     meta.operator = operator;
     final map = meta.toMap();
+    // Which phrase list this session was recorded against.
+    map['lang'] = PhraseBook.code;
 
     // Local disk is the record of truth and never fails for lack of a network.
     await Storage.writeSessionMeta(map);
@@ -244,6 +247,7 @@ class SyncService extends ChangeNotifier {
     // Who recorded it, so the dashboard can show per-collector totals.
     map['collectorEmail'] = Team.email;
     map['collectorName'] = operator;
+    map['lang'] = PhraseBook.code;
 
     // Local manifest first — the preprocessing pipeline can read this even if
     // the phone never goes online.
@@ -470,7 +474,8 @@ class SyncService extends ChangeNotifier {
   /// Writes the Firestore row for a clip that was already in Drive before the
   /// app existed. There is no local file and nothing to upload.
   Future<void> registerImportedClip(Map<String, dynamic> map) =>
-      clips.doc(map['docId'] as String).set(map, SetOptions(merge: true));
+      clips.doc(map['docId'] as String).set(
+          {...map, 'lang': PhraseBook.code}, SetOptions(merge: true));
 
   // ------------------------------------------------------------ the queue
   Future<List<Map<String, dynamic>>> _readQueue() async {
@@ -486,6 +491,20 @@ class SyncService extends ChangeNotifier {
     await prefs.setStringList(_queueKey, q.map(jsonEncode).toList());
     _pendingCount = q.length;
     notifyListeners();
+  }
+
+  /// Takes one clip out of the queue by name, not by position.
+  ///
+  /// The background service works on this same list, so a clip may have been
+  /// removed by the other side between the read and the write. Removing the
+  /// first entry blindly would then drop somebody else's clip from the queue
+  /// without uploading it.
+  Future<void> _removeFromQueue(String docId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final q = await _readQueue();
+    q.removeWhere((e) => e['docId'] == docId);
+    await _writeQueue(q);
   }
 
   Future<void> _enqueue(ClipRecord clip) async {
@@ -523,8 +542,8 @@ class SyncService extends ChangeNotifier {
 
         if (!file.existsSync()) {
           // Nothing to upload — drop it rather than block the queue forever.
-          q.removeAt(0);
-          await _writeQueue(q);
+          await _removeFromQueue(item['docId'] as String);
+          q = await _readQueue();
           continue;
         }
 
@@ -545,8 +564,8 @@ class SyncService extends ChangeNotifier {
           'uploadedUtc': DateTime.now().toUtc().toIso8601String(),
         }, SetOptions(merge: true)).catchError((Object _) {}));
 
-        q.removeAt(0);
-        await _writeQueue(q);
+        await _removeFromQueue(item['docId'] as String);
+        q = await _readQueue();
         _status = '${q.length} left';
         notifyListeners();
       }

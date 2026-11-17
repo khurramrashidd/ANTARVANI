@@ -4,6 +4,166 @@ Zip files are numbered: `ANTARVANI_app_v01.zip`, `v02`, `v03` … Always use the
 highest number. (This is the delivery number, not the app's `version:` in
 pubspec.yaml, which stays 1.0.0+1 until you decide to change it.)
 
+## v30 — 17 Nov 2026
+
+**Uploads carry on after the app is closed.** A real Android foreground
+service now drains the upload queue, over WiFi or mobile data. It shows a
+notification while it works — that is not decoration, it is what Android
+requires in exchange for being allowed to run at all. When the queue empties
+the service stops and the notification disappears.
+
+The app and the service never upload at the same time: the app hands the
+queue over when it leaves the screen and takes it back when it returns. Both
+sides now remove a clip from the queue **by its id** rather than by position,
+so neither can drop a clip the other still owes. Drive also refuses a second
+copy of a file name that is already there, which is a third line of defence.
+
+**Settings → Background upload** (team members): switches for background
+upload and for using mobile data, then the three steps Android needs —
+notification permission, battery-optimisation exemption, and Autostart. The
+first two the app can request; **Autostart cannot be switched on by any app**
+on Realme, Redmi, Oppo and Vivo, so the page says where to find it. Without
+the battery exemption the service is killed within minutes of the screen
+going off, which is the single most common reason background upload appears
+to do nothing.
+
+The page also shows how many clips are on the phone, how many the service has
+sent, when it last ran, and the last error it hit.
+
+The red banner on a collector's home screen now links straight to that page.
+
+**Collectors tab: own card plus team totals.** A collector sees the team's
+combined figures — collectors, speakers, clips, how many are not in Drive —
+and then their own card in full. No other person's name or shortfall.
+Admins and the master still see everyone by name.
+
+**Setup adds six Android permissions** (foreground service, data-sync type,
+notifications, wake lock, boot, battery exemption). Run `setup` before
+building.
+
+**Not verified on a phone.** None of this could be compiled or run here. Two
+things are most likely to need one fix: the exact shape of the background
+service plugin's configuration call, and whether Drive sign-in works from the
+background isolate on your phone. If the build fails, send me the error. If
+the build is fine but background upload does nothing, open Settings →
+Background upload and send me the "Last problem" line.
+
+## v29 — 17 Nov 2026
+
+**A Collectors tab on the corpus dashboard.** Admins and the master see every
+collector; a collector sees only their own card. Per person:
+
+- clips recorded, how many are in Drive, how many are still waiting
+- how many speakers they recorded, and on how many days
+- first and last recording, with date and time
+- which phone holds the waiting clips and when that phone was last online
+- framing quality: percentage flagged by the face check, average face score
+  and mouth width
+- expand "Not in Drive" to see the **speaker names and IDs** whose clips are
+  stuck, how many each, when they were recorded and which phrases
+
+**Nudge.** An admin can send a collector a reminder from their card; it goes
+to the team chat with the exact counts.
+
+**Warning on the collector's own phone.** A red card at the top of their home
+screen whenever clips are still on the device, with an Upload now button. The
+person holding the clips is the one who can send them.
+
+**Stuck-clip alert on Overview.** A banner when anything has been waiting over
+24 hours, naming the collector and how old the oldest clip is.
+
+**Framing — worst speakers first.** A chart at the bottom of the Collectors
+tab, lowest face score first. Below roughly 60% a clip is dropped during
+training, so a red row is data you are about to lose.
+
+**Fixed the confusing upload line on Overview.** It used to read "94 clips
+still to upload (0 queued on this phone) — all uploaded", which is three
+different facts in one sentence. It now says how many are not in Drive, how
+many of those are on this phone, and points at the Collectors tab for the
+rest.
+
+Nothing new is stored: every number here already existed in the clip records.
+Five tests added. Run `setup` as usual; no rules or Gradle changes.
+
+## v28 — 11 Nov 2026
+
+Fixes the release build stopping at `:tflite_flutter:compileReleaseKotlin`
+with *Inconsistent JVM-target compatibility ... (11) and ... (21)*.
+
+The cause is inside the plugin, not our code. `tflite_flutter`'s own Gradle
+file still asks javac for Java 11, and because the plugin does not bring its
+own Kotlin plugin it is compiled by Flutter's built-in Kotlin, which targets
+the JDK running Gradle — 21. Kotlin refuses to build a module whose two
+halves disagree. Nothing in `android/app` can change another module's build
+file, so the root `android/build.gradle.kts` now raises that one module's
+Java level to match whatever Kotlin is using. Only `tflite_flutter` is
+touched: raising a plugin whose Kotlin target is deliberately low would cause
+the same clash in reverse.
+
+As a second line of defence, setup writes
+`kotlin.jvm.target.validation.mode=warning` into `android/gradle.properties`,
+so a different JDK on someone else's laptop produces a warning instead of a
+failed build.
+
+Run `setup` before building — it rewrites the root Gradle file and the
+properties file. No app code changed.
+
+The "plugins that apply Kotlin Gradle Plugin (KGP)" warning about
+camera, device_info_plus, flutter_tts and package_info_plus is unrelated: it
+is a notice about a *future* Flutter release, and those plugins have to fix it
+themselves.
+
+## v27 — 11 Nov 2026
+
+Fixes the one error `setup` reported on v26: a variable named twice in
+`language_service.dart` (adding a language). Also imports `BytesBuilder`
+directly in `model_service.dart`, which clears the deprecation warning.
+Nothing else changed.
+
+## v26 — 11 Nov 2026
+
+**The app now recognises speech.** Speak is no longer a mock-up: it counts
+down, watches the lips for three seconds through the front camera, runs the
+model on the phone and says the phrase aloud. If it is not sure it offers its
+three best guesses instead of guessing wrong out loud. No video is saved and
+no audio is opened.
+
+**The model is not inside the APK.** An admin pastes one link in
+Corpus > Overview > **Publish a model**. The app downloads the model itself
+to check the link and the checksum, shows the accuracy and what it replaces,
+and on confirm every phone fetches it the next time it is online. Retraining
+never needs a new build. Publishing an older link rolls back.
+
+**One-click training.** `pipeline/ANTARVANI_train.ipynb`: Run all. It finds
+the corpus, preprocesses only the videos it has not seen, measures accuracy
+on speakers the model never saw, runs the personalisation study, trains the
+final model, and (with a token) uploads it and prints the link.
+See `docs/MODEL_PIPELINE.md`.
+
+**Personalise works.** The patient mouths a phrase a few times; the samples
+stay on the phone as small greyscale mouth crops. Recognition is pulled
+towards the patient's own samples. A model update does not lose them — they
+are re-read with the new model the next time Speak opens.
+
+**Languages.** Corpus > Overview > **Languages**. Hindi is built in. An
+admin adds another by pasting a phrase file (`pipeline/languages/`). The
+chosen language decides the phrases recorded, the Drive folder
+(`lang_<code>/P01…`), the dashboard and the model used. Existing Hindi data
+is untouched and stays where it is.
+
+**Setup changes** (run `setup` once): two new rules (`models`, `languages`:
+anyone signed in reads, admins write), minSdk 24 -> 26 because TensorFlow
+Lite needs Android 8, and a `proguard-rules.pro` so the release build keeps
+the TensorFlow classes. Two new packages: `tflite_flutter`, `crypto`.
+
+The app is locked to portrait: the lip crop assumes an upright phone.
+
+**Not yet verified on a phone.** None of this could be compiled or run where
+it was written. The training code was run end to end on synthetic clips and
+the phone's crop arithmetic was checked pixel-for-pixel against the training
+crop, but the first real build and the first real recognition are yours.
+`pubspec.yaml` is still `1.0.0+1`.
+
 ## v25 — 5 Nov 2026
 
 **"Already linked to a different account" — fixed.** A session could be

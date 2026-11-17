@@ -7,6 +7,7 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../phrases.dart';
 import 'auth_service.dart';
 
 /// What happened when we tried to destroy a file.
@@ -75,6 +76,7 @@ class DriveUploader {
 
   drive.DriveApi? _api;
   final Map<String, String> _phraseFolders = {};
+  final Map<String, String> _langRoots = {};
   String? _rejectedFolderId;
   String? _deletedFolderId;
 
@@ -124,6 +126,7 @@ class DriveUploader {
   void reset() {
     _api = null;
     _phraseFolders.clear();
+    _langRoots.clear();
     _rejectedFolderId = null;
     _deletedFolderId = null;
     corpusWritable = null;
@@ -154,38 +157,106 @@ class DriveUploader {
   }
 
   // ------------------------------------------------------------- folders
-  Future<String?> _findFolder(String name) async {
+  /// Folder name of a language inside the corpus: "lang_mr".
+  static String langFolderName(String code) => 'lang_$code';
+
+  /// Where the language in use keeps its P01.. folders. Hindi sits directly
+  /// in the corpus folder (that is where the first recordings went); every
+  /// other language has its own sub-folder, made on first use.
+  Future<String> _root() async {
+    final code = PhraseBook.code;
+    if (code == 'hi') return corpusFolderId;
+    final cached = _langRoots[code];
+    if (cached != null) return cached;
+    final id = await _childFolder(corpusFolderId, langFolderName(code));
+    _langRoots[code] = id;
+    return id;
+  }
+
+  Future<String?> _findChild(String parent, String name) async {
     final api = _api;
     if (api == null) return null;
     final found = await api.files.list(
       q: "name = '$name' and "
           "mimeType = 'application/vnd.google-apps.folder' and "
-          "'$corpusFolderId' in parents and trashed = false",
+          "'$parent' in parents and trashed = false",
       $fields: 'files(id)',
     );
     final files = found.files;
     return (files == null || files.isEmpty) ? null : files.first.id;
   }
 
-  Future<String> _folder(String name) async {
-    final existing = await _findFolder(name);
+  Future<String> _childFolder(String parent, String name) async {
+    final existing = await _findChild(parent, name);
     if (existing != null) return existing;
     final created = await _api!.files.create(
       drive.File()
         ..name = name
         ..mimeType = 'application/vnd.google-apps.folder'
-        ..parents = [corpusFolderId],
+        ..parents = [parent],
       $fields: 'id',
     );
     return created.id!;
   }
 
+  Future<String?> _findFolder(String name) async {
+    if (_api == null) return null;
+    return _findChild(await _root(), name);
+  }
+
+  Future<String> _folder(String name) async =>
+      _childFolder(await _root(), name);
+
+  /// Writes phrases.json into a language's folder, replacing an older copy.
+  /// The training notebook reads the phrase list from this file.
+  Future<bool> writeLanguageSpec(String code, String json) async {
+    final api = _api;
+    if (api == null) {
+      lastError = 'Drive is not connected.';
+      return false;
+    }
+    try {
+      final parent = code == 'hi'
+          ? corpusFolderId
+          : await _childFolder(corpusFolderId, langFolderName(code));
+      _langRoots[code] = parent;
+      final old = await api.files.list(
+        q: "name = 'phrases.json' and '$parent' in parents and "
+            "trashed = false",
+        $fields: 'files(id)',
+      );
+      final bytes = utf8.encode(json);
+      final media = drive.Media(Stream.value(bytes), bytes.length,
+          contentType: 'application/json');
+      final hits = old.files ?? const <drive.File>[];
+      if (hits.isNotEmpty && hits.first.id != null) {
+        await api.files.update(drive.File(), hits.first.id!,
+            uploadMedia: media);
+      } else {
+        await api.files.create(
+          drive.File()
+            ..name = 'phrases.json'
+            ..parents = [parent],
+          uploadMedia: media,
+          $fields: 'id',
+        );
+      }
+      lastError = null;
+      return true;
+    } catch (e) {
+      lastError = 'Could not write phrases.json: $e';
+      debugPrint(lastError);
+      return false;
+    }
+  }
+
   /// Finds P01..P20 inside the corpus folder, creating it only if missing.
   Future<String> _phraseFolder(String phraseId) async {
-    final cached = _phraseFolders[phraseId];
+    final key = '${PhraseBook.code}/$phraseId';
+    final cached = _phraseFolders[key];
     if (cached != null) return cached;
     final id = await _folder(phraseId);
-    _phraseFolders[phraseId] = id;
+    _phraseFolders[key] = id;
     return id;
   }
 

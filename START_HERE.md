@@ -18,4 +18,5 @@ click, and writes `setup_report.txt`. Run it again any time; it is safe.
 - `lib/`          app code
 - `tool/`         the setup script
 - `assets/logo/`  logo, launcher icon, wordmark for slides/reports
-- `docs/`         FIREBASE_SETUP.md (manual reference), COMMANDS.md
+- `pipeline/`     the Colab training notebook, its code, language template
+- `docs/`         MODEL_PIPELINE.md (train and publish a model), FIREBASE_SETUP.md, COMMANDS.md
