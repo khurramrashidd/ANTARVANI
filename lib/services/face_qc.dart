@@ -5,6 +5,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
+import 'camera_image.dart';
+
 /// Live quality control on the camera preview, entirely on-device.
 ///
 /// Why the preview and not the recorded file: Android cannot reliably run a
@@ -52,22 +54,28 @@ class FaceQc {
 
   bool _busy = false;
 
+  /// Why the last frame could not be checked at all. Null while it works.
+  String? lastError;
+
   void dispose() => _detector.close();
 
-  /// Convert a camera frame to the format ML Kit wants. The controller must be
-  /// created with `imageFormatGroup: ImageFormatGroup.nv21`, which gives a
-  /// single-plane image ML Kit accepts directly.
+  /// Convert a camera frame to the format ML Kit wants.
+  ///
+  /// The bytes are packed by [toNv21] rather than taken from the first plane:
+  /// asking for `ImageFormatGroup.nv21` does not guarantee you get it, and
+  /// passing the luminance plane alone makes ML Kit fail on every frame.
   InputImage? _toInputImage(CameraImage image, CameraDescription cam) {
     final rotation =
         InputImageRotationValue.fromRawValue(cam.sensorOrientation);
     if (rotation == null || image.planes.isEmpty) return null;
+    final f = nv21FrameOf(image);
     return InputImage.fromBytes(
-      bytes: image.planes.first.bytes,
+      bytes: f.bytes,
       metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
+        size: Size(f.width.toDouble(), f.height.toDouble()),
         rotation: rotation,
         format: InputImageFormat.nv21,
-        bytesPerRow: image.planes.first.bytesPerRow,
+        bytesPerRow: f.rowStride,
       ),
     );
   }
@@ -132,8 +140,11 @@ class FaceQc {
         problem: problem,
       );
     } catch (e) {
+      // Returning null here used to hide a permanent failure as a dropped
+      // frame, which is how every clip came to be scored 0.
+      lastError = '$e';
       debugPrint('FaceQc error: $e');
-      return null;
+      return FrameCheck.bad;
     } finally {
       _busy = false;
     }

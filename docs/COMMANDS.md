@@ -144,7 +144,7 @@ two different versions of the recorder.
 **1. Bump the build number.** In `pubspec.yaml`, the line is:
 
 ```
-version: 1.0.0+1
+version: 1.0.0+2
 ```
 
 The number after `+` is the build number. Raise it by one for every APK you

@@ -176,6 +176,13 @@ says exactly this.
 
 ## Data
 - Clips → corpus folder in khurramrashid0786's Drive, `P01..P20/S014_P03_t02.mp4`
+- A session still short of its target waits in
+  `_in_progress/S011/S011_P03_t01.mp4` and moves into the phrase folders when
+  it is finished. The pipeline reads `P01..P20` and nothing else, so a
+  half-recorded volunteer cannot reach a model by accident.
+- `_skip_speakers.txt` at the top of the corpus folder lists the speakers
+  master has rejected. The pipeline drops them whatever is on disk, so a
+  rejection counts immediately — before anyone moves a file.
 - Firestore: `users`, `counters`, `speakers`, `clips`, `devices`, `messages`,
   `patients/{email}/...` (reserved for patient data)
 - Patient history and caregiver number stay on the phone.

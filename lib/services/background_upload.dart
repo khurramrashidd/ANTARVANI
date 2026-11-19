@@ -271,6 +271,25 @@ Future<void> backgroundEntry(ServiceInstance service) async {
     return;
   }
 
+  // Which sessions are finished, so a clip can go straight into P01..P20
+  // instead of the holding folder. Asked once per speaker, not once per clip.
+  final complete = <String, bool>{};
+  Future<bool> sessionDone(String speakerId) async {
+    final known = complete[speakerId];
+    if (known != null) return known;
+    var done = false;
+    try {
+      final doc = await db.collection('speakers').doc(speakerId).get();
+      done = (doc.data()?['status'] as String?) == 'complete';
+    } catch (e) {
+      // Unknown means holding: a clip waiting there gets moved in later, a
+      // clip written into the corpus too early does not get taken out.
+      debugPrint('background speaker status: $e');
+    }
+    complete[speakerId] = done;
+    return done;
+  }
+
   var sent = 0;
   while (!stopping) {
     await prefs.reload();
@@ -313,6 +332,7 @@ Future<void> backgroundEntry(ServiceInstance service) async {
         file: file,
         fileName: '${item['fileName']}',
         speakerId: '${item['speakerId']}',
+        speakerComplete: await sessionDone('${item['speakerId']}'),
       );
     } catch (e) {
       id = null;
@@ -331,6 +351,7 @@ Future<void> backgroundEntry(ServiceInstance service) async {
       await db.collection('clips').doc('${item['docId']}').set({
         'uploaded': true,
         'driveFileId': id,
+        'inCorpus': complete['${item['speakerId']}'] ?? false,
         'uploadedUtc': DateTime.now().toUtc().toIso8601String(),
       }, SetOptions(merge: true));
     } catch (e) {

@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,12 +84,18 @@ HINDI = {
 class Config:
     lang: str = "hi"
     corpus_dir: str = ""           # folder holding P01..P20 ('' = find it)
-    work_dir: str = "/content/drive/MyDrive/ANTARVANI_work"
+    work_dir: str = ""             # '' = find the shared ANTARVANI_train
     drive_root: str = "/content/drive/MyDrive"
+    min_phrases: int = 20   # a speaker trains only once this many phrases
+                            # of theirs are in Drive
     folds: int = 5
     epochs: int = 60
     batch: int = 16
     seed: int = 7
+    checkpoint: bool = True        # save inside a fold, so a GPU cut-off
+                                   # costs an epoch instead of a fold
+    allow_cpu: bool = False        # refuse to train without a GPU
+    account: str = ""              # which Google account is running this
     github_repo: str = ""          # "user/repo" - '' = do not upload
     github_token: str = ""
     notes: str = ""
@@ -131,7 +138,16 @@ def load_language(cfg: Config):
     recordings went. Every later language gets its own sub-folder, lang_<code>,
     which the app creates together with a phrases.json describing it.
     """
-    corpus = cfg.corpus_dir or find_corpus(cfg.drive_root)
+    corpus = cfg.corpus_dir
+    if corpus and not Path(corpus).is_dir():
+        # The same shared folder sits at a different path in each account's
+        # Drive. A path typed for one account is a hint, not a failure.
+        cfg.say(f"note: {corpus} is not in this Drive - looking for the "
+                "corpus folder instead")
+        corpus = ""
+    if not corpus:
+        corpus = find_named(cfg.drive_root, "ANTARVANI") or \
+            find_corpus(cfg.drive_root)
     if not corpus or not Path(corpus).is_dir():
         raise SystemExit(
             "Could not find the corpus folder (the one holding P01, P02 ...).\n"
@@ -201,10 +217,213 @@ def normalise_language(spec: dict, code: str | None = None) -> dict:
     return out
 
 
+# ---------------------------------------------- the same folders, any account
+def find_named(drive_root: str, name: str, depth: int = 3) -> str | None:
+    """Finds a folder by name anywhere near the top of this Drive.
+
+    Four accounts share one corpus and one work folder, and a shared folder
+    sits at a different path in each account's Drive depending on where the
+    shortcut was added. So nothing is hardcoded: the folder is looked up by
+    name, wherever the person put it.
+    """
+    root = Path(drive_root)
+    if not root.is_dir():
+        return None
+    level = [root]
+    for _ in range(depth):
+        nxt = []
+        for d in level:
+            try:
+                subs = [x for x in d.iterdir() if x.is_dir()]
+            except OSError:
+                continue
+            for x in subs:
+                if x.name == name:
+                    return str(x)
+            nxt += [x for x in subs if not x.name.startswith((".", "_"))]
+        level = nxt
+    return None
+
+
+def resolve_work_dir(cfg: Config, corpus: Path) -> Path:
+    """Where this run keeps its cache, its finished folds and its models.
+
+    This must be the *same* folder for every account, or account two starts
+    from nothing instead of carrying on. So an existing folder is always
+    preferred over making a new one, and a new one says loudly that it is new.
+    """
+    if cfg.work_dir:
+        work = Path(cfg.work_dir)
+        work.mkdir(parents=True, exist_ok=True)
+    else:
+        found = find_named(cfg.drive_root, "ANTARVANI_train")
+        if found:
+            work = Path(found)
+        else:
+            work = Path(cfg.drive_root) / "ANTARVANI_train"
+            work.mkdir(parents=True, exist_ok=True)
+            cfg.say("")
+            cfg.say("NOTE: no shared ANTARVANI_train folder was found in this")
+            cfg.say(f"Drive, so a new one was made at {work}.")
+            cfg.say("If the other accounts already have one, stop now, add a")
+            cfg.say("shortcut to it, and run again - otherwise this account")
+            cfg.say("will train from scratch instead of carrying on.")
+        cfg.work_dir = str(work)
+
+    # A stamp that is written once and never changes. Every account prints
+    # it, so one glance says whether they really are sharing a folder.
+    stamp = work / "work_id.json"
+    if stamp.is_file():
+        try:
+            wid = json.loads(stamp.read_text(encoding="utf-8")).get("id", "?")
+        except Exception:
+            wid = "?"
+    else:
+        wid = hashlib.md5(
+            f"{datetime_now()}{work}".encode()).hexdigest()[:8]
+        stamp.write_text(json.dumps({"id": wid, "madeBy": cfg.account,
+                                     "madeAt": datetime_now()}, indent=1),
+                         encoding="utf-8")
+    cfg.say(f"work     : {work}")
+    cfg.say(f"work id  : {wid}   (must be the same on every account)")
+    return work
+
+
+def datetime_now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+# ------------------------------------------------------------------ the GPU
+def gpu_present() -> bool:
+    try:
+        import tensorflow as tf
+        return bool(tf.config.list_physical_devices("GPU"))
+    except Exception:
+        return False
+
+
+def require_gpu(cfg: Config, where: str = "") -> None:
+    """Stops rather than grinding through hours of CPU training.
+
+    When Colab's free GPU allowance runs out it hands back a CPU runtime
+    instead of refusing outright. Training would still 'work' - perhaps
+    fifteen times slower - and the first sign would be an evening gone. So
+    the GPU is checked before the first fold and before every fold after it.
+    """
+    if cfg.allow_cpu or gpu_present():
+        return
+    cfg.say("")
+    cfg.say("=" * 64)
+    cfg.say("NO GPU AVAILABLE" + (f" ({where})" if where else ""))
+    cfg.say("")
+    cfg.say("Colab hands back a CPU runtime once the free GPU allowance is")
+    cfg.say("used up. Training on it would take most of a day, so it stops")
+    cfg.say("here instead. Everything finished so far is saved in Drive.")
+    cfg.say("")
+    cfg.say("Either try Runtime > Change runtime type > T4 GPU, or open this")
+    cfg.say("notebook from your next Google account and Run all - it will")
+    cfg.say("carry on from exactly this point.")
+    cfg.say("=" * 64)
+    raise SystemExit("No GPU - switch accounts and run again.")
+
+
+# ------------------------------------------------- one account at a time
+LOCK_STALE = 40 * 60   # seconds
+
+
+def _lock_file(resume: Path) -> Path:
+    return resume / "lock.json"
+
+
+def claim_lock(resume: Path, cfg: Config, force: bool = False) -> None:
+    """Stops two accounts training the same thing at once.
+
+    Both would write the same fold files, and whichever finished last would
+    win - wasting a whole session's GPU for nothing.
+    """
+    import socket
+    me = cfg.account or socket.gethostname()
+    f = _lock_file(resume)
+    if f.is_file() and not force:
+        try:
+            held = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            held = {}
+        age = time.time() - float(held.get("at", 0))
+        if held.get("by") and held.get("by") != me and age < LOCK_STALE:
+            mins = int(age // 60)
+            raise SystemExit(
+                f"Another account ({held['by']}) started training {mins} "
+                f"minute(s) ago.\nWait for it to finish, or if you are sure "
+                "it has stopped, set FORCE = True in the settings cell.")
+    f.write_text(json.dumps({"by": me, "at": time.time(),
+                             "since": datetime_now()}, indent=1),
+                 encoding="utf-8")
+
+
+def touch_lock(resume: Path, cfg: Config) -> None:
+    import socket
+    try:
+        _lock_file(resume).write_text(
+            json.dumps({"by": cfg.account or socket.gethostname(),
+                        "at": time.time(), "since": datetime_now()},
+                       indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def release_lock(resume: Path) -> None:
+    try:
+        _lock_file(resume).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 # ----------------------------------------------------------------- 2. scan
+SKIP_FILE = "_skip_speakers.txt"
+HOLDING_DIR = "_in_progress"
+
+
+def skip_list(root: str, cfg: Config) -> set[str]:
+    """Speakers the app has marked rejected, read from _skip_speakers.txt.
+
+    A rejection has to take effect without anything being moved: the videos
+    may belong to a collector who is not around to move them, and waiting on
+    that would mean training on a session the master admin has thrown out.
+    So the app writes the IDs here and this is the list that decides.
+    """
+    # Speaker numbers are shared across languages, so the app writes one
+    # list at the top of the corpus folder. For Hindi that is this folder;
+    # for a lang_xx folder it is the one above.
+    here = Path(root)
+    f = next((p for p in (here / SKIP_FILE, here.parent / SKIP_FILE)
+              if p.is_file()), None)
+    if f is None:
+        return set()
+    out = set()
+    for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.split("#", 1)[0].strip().upper()
+        if line:
+            out.add(line)
+    if out:
+        cfg.say(f"skip list: {len(out)} rejected speaker(s) left out "
+                f"({', '.join(sorted(out)[:8])}"
+                f"{'...' if len(out) > 8 else ''})")
+    return out
+
+
+def holding_count(root: str) -> int:
+    """Clips parked in _in_progress because their session is unfinished."""
+    d = Path(root) / HOLDING_DIR
+    if not d.is_dir():
+        return 0
+    return sum(1 for f in d.rglob("*") if f.suffix.lower() in VIDEO_EXT)
+
+
 def scan(root: str, spec: dict, cfg: Config) -> list[dict]:
     """Every usable clip. Folders that are not P01..Pnn (_rejected, _deleted,
-    lang_xx, anything else) are ignored, so rejected clips never train."""
+    _in_progress, lang_xx, anything else) are ignored, so rejected and
+    half-recorded speakers never train."""
     n = len(spec["phrases"])
     clips, odd = [], []
     for d in sorted(p for p in Path(root).iterdir() if p.is_dir()):
@@ -243,7 +462,92 @@ def scan(root: str, spec: dict, cfg: Config) -> list[dict]:
         cfg.say(f"note: {len(odd)} file(s) are not named by the app "
                 f"(e.g. {odd[0]}). Import them in the app (Corpus > Import) "
                 "so they get a speaker number.")
+
+    skip = skip_list(root, cfg)
+    if skip:
+        before = len(clips)
+        clips = [c for c in clips if c["speaker"].upper() not in skip]
+        dropped = before - len(clips)
+        if dropped:
+            cfg.say(f"skip list: {dropped} clip(s) left out of training")
+
+    waiting = holding_count(root)
+    if waiting:
+        cfg.say(f"note: {waiting} clip(s) sit in {HOLDING_DIR}/ and are NOT "
+                "trained on - those sessions are unfinished. If one of them "
+                "is finished, open the app and use the \"Clips in the wrong "
+                "folder\" card to move them in.")
     return clips
+
+
+def select_speakers(clips: list[dict], spec: dict, cfg: Config):
+    """Keeps only the speakers whose set is complete enough to train on.
+
+    A half-recorded speaker is not neutral: their missing phrases pull those
+    classes down and their present ones are over-weighted, so a speaker with
+    six phrases in Drive makes the model worse at the other fourteen. The
+    clips are not thrown away — they are simply not used until the rest of
+    that session reaches Drive, which it will as soon as the collector
+    uploads.
+
+    Returns (clips to train on, a record of who was used and who was not).
+    """
+    ids = [p["id"] for p in spec["phrases"]]
+    n = len(ids)
+    want = min(max(1, cfg.min_phrases), n)
+
+    by = defaultdict(list)
+    for c in clips:
+        by[c["speaker"]].append(c)
+
+    kept, used, skipped = [], [], []
+    for sp in sorted(by):
+        cs = by[sp]
+        have = {c["phrase"] for c in cs}
+        missing = [i for i in ids if i not in have]
+        row = {"speaker": sp, "clips": len(cs), "phrases": len(have),
+               "missing": missing}
+        if len(have) >= want:
+            used.append(row)
+            kept.extend(cs)
+        else:
+            skipped.append(row)
+
+    cfg.say("")
+    cfg.say(f"speakers with at least {want} of {n} phrases in Drive: "
+            f"{len(used)}  -> training on these")
+    for r in used:
+        short = (f"  (missing {', '.join(r['missing'])})"
+                 if r["missing"] else "")
+        cfg.say(f"  {r['speaker']}  {r['clips']:4d} clips  "
+                f"{r['phrases']}/{n} phrases{short}")
+
+    if skipped:
+        cfg.say("")
+        cfg.say(f"speakers skipped, not enough in Drive yet: {len(skipped)}")
+        for r in skipped:
+            miss = ", ".join(r["missing"][:8])
+            more = " …" if len(r["missing"]) > 8 else ""
+            cfg.say(f"  {r['speaker']}  {r['clips']:4d} clips  "
+                    f"{r['phrases']}/{n} phrases  missing {miss}{more}")
+        cfg.say("")
+        cfg.say("  Those clips exist on somebody's phone. In the app: "
+                "Collect data >")
+        cfg.say("  Progress & uploads > Collectors shows whose phone, and "
+                "lets you nudge them.")
+        cfg.say("  They join training by themselves on the next run once "
+                "they reach Drive.")
+
+    if not kept:
+        raise SystemExit(
+            f"No speaker has {want} of {n} phrases in Drive yet, so there is "
+            "nothing to train on.\nEither wait for the uploads, or lower "
+            "MIN_PHRASES in the settings cell.")
+
+    roster = {"minPhrases": want, "phraseCount": n,
+              "used": used, "skipped": skipped,
+              "speakerIds": [r["speaker"] for r in used]}
+    return kept, roster
 
 
 def describe(clips: list[dict], spec: dict, cfg: Config) -> dict:
@@ -289,6 +593,126 @@ def describe(clips: list[dict], spec: dict, cfg: Config) -> dict:
             "multiTakeSpeakers": len(multi), "missingPhrases": missing,
             "perPhrase": {p["id"]: per_phrase[p["id"]]
                           for p in spec["phrases"]}}
+
+
+# ------------------------------------------------- surviving a hard stop
+def save_npz(path: Path, **arrays) -> None:
+    """Writes a .npz so that a killed session cannot leave a half file.
+
+    Colab does not warn before it stops a runtime. A file being written at
+    that moment is left truncated, and numpy raises on it the next run — so
+    the work looks finished but cannot be read. Writing to a temporary name
+    and renaming afterwards means the real name only ever appears complete.
+    """
+    # The suffix has to stay .npz: numpy appends .npz to any savez path
+    # that does not already end in it, and the rename below would then look
+    # for a file that was never written.
+    tmp = path.with_name(path.name + ".part.npz")
+    np.savez_compressed(tmp, **arrays)
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        # Some mounted filesystems refuse rename; fall back to a copy.
+        import shutil
+        shutil.copyfile(tmp, path)
+        tmp.unlink(missing_ok=True)
+
+
+def save_text(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".part")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        path.write_text(text, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+
+
+def readable_npz(path: Path) -> bool:
+    """True if the file is whole. Opening is not enough — the array has to
+    come out, because a truncated archive only fails on decompression."""
+    try:
+        with np.load(path) as z:
+            return z["x"].shape[0] > 0
+    except Exception:
+        return False
+
+
+def health_check(cfg: Config) -> None:
+    """Fails now, with a sentence, rather than in an hour with a stack trace."""
+    work = Path(cfg.work_dir)
+    try:
+        work.mkdir(parents=True, exist_ok=True)
+        probe = work / ".write_test"
+        probe.write_text("ok", encoding="utf-8")
+        got = probe.read_text(encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        if got != "ok":
+            raise OSError("read back the wrong thing")
+    except Exception as e:
+        raise SystemExit(
+            f"Cannot write to the work folder ({work}): {e}\n"
+            "Either Drive is not mounted, or this account only has view "
+            "access to the shared folder. Re-run the Drive mount cell, and "
+            "check the folder is shared with this account as Editor.")
+
+
+# ------------------------------------------------------- what to do now
+def plan_banner(cfg: Config, clips_total: int = 0) -> None:
+    """Says, in plain words, whether this runtime is the right one, and what
+    a restart would and would not cost."""
+    cache = Path(cfg.work_dir) / "cache" / cfg.lang
+    cached = len(list(cache.glob("*.npz"))) if cache.is_dir() else 0
+    base = Path(cfg.work_dir) / "resume" / cfg.lang
+    folds, final = set(), False
+    if base.is_dir():
+        for d in base.iterdir():
+            if d.is_dir():
+                folds |= {x.name for x in d.glob("fold*.npz")}
+                final = final or (d / "final.weights.h5").is_file()
+    gpu = gpu_present()
+
+    print()
+    print("=" * 66)
+    print("WHAT TO DO NOW")
+    print("=" * 66)
+    print(f"This runtime has: {'a GPU' if gpu else 'NO GPU (CPU only)'}")
+    print()
+    print("  Cropping the videos  ->  CPU is fine, and it spends none of")
+    print("                           your GPU allowance")
+    print("  Training the model   ->  needs a GPU; on CPU it takes about")
+    print("                           fifteen times longer")
+    print()
+    if clips_total:
+        print(f"  clips to crop   : {cached} of {clips_total} already done")
+    else:
+        print(f"  clips cropped   : {cached}")
+    print(f"  folds trained   : {len(folds)}"
+          f"{' (final model also done)' if final else ''}")
+    print()
+    print("Switching the runtime type RESTARTS the machine and empties")
+    print("/content. That is safe. Nothing slow is kept there:")
+    print()
+    print(f"    {cfg.work_dir}")
+    print()
+    print("holds the crops, every finished fold and a checkpoint inside the")
+    print("fold being trained, and all of it is written as it finishes. On")
+    print("the next run each of those is read back, so no crop and no fold")
+    print("is ever done twice. The most a hard stop costs you is the epochs")
+    print("since the last checkpoint.")
+    print()
+    if not gpu and cached < max(clips_total, 1):
+        print("NEXT: leave CROP_ONLY = True and Run all. Cropping does not")
+        print("      need a GPU. Switch to T4 afterwards for the training.")
+    elif not gpu:
+        print("NEXT: Runtime > Change runtime type > T4 GPU, then Run all.")
+        print("      If Colab will not give one, this account's allowance is")
+        print("      used up - open this notebook from the next account and")
+        print("      Run all. It carries on from the numbers above.")
+    else:
+        print("NEXT: Run all. Training will start, or carry on, on this GPU.")
+    print("=" * 66)
+    print()
 
 
 # ----------------------------------------------------------- 3. preprocess
@@ -426,12 +850,31 @@ def preprocess(clips: list[dict], cache_dir: str, cfg: Config) -> list[dict]:
                 bad[c["key"]] = {"name": c["name"], "why": err}
                 cfg.say(f"  skip {c['phrase']}/{c['name']}: {err}")
             else:
-                np.savez_compressed(cache / f"{c['key']}.npz", x=arr)
+                save_npz(cache / f"{c['key']}.npz", x=arr)
             if n % 25 == 0 or n == len(todo):
                 print(f"  {n}/{len(todo)}")
-                bad_file.write_text(json.dumps(bad, indent=1))
-        bad_file.write_text(json.dumps(bad, indent=1))
+                save_text(bad_file, json.dumps(bad, indent=1))
+        save_text(bad_file, json.dumps(bad, indent=1))
+    # A session killed during a write leaves a file that exists but cannot
+    # be read. Catch that here, where it can still be fixed, rather than an
+    # hour later in the middle of training.
     good = [c for c in clips if (cache / f"{c['key']}.npz").is_file()]
+    broken = [c for c in good if not readable_npz(cache / f"{c['key']}.npz")]
+    if broken:
+        cfg.say(f"{len(broken)} cached clip(s) were damaged by an interrupted "
+                "run - cropping them again")
+        cropper = LipCropper(str(Path(cache_dir).parent))
+        for c in broken:
+            (cache / f"{c['key']}.npz").unlink(missing_ok=True)
+            arr, err = process_clip(c["path"], cropper)
+            if err:
+                bad[c["key"]] = {"name": c["name"], "why": err}
+            else:
+                save_npz(cache / f"{c['key']}.npz", x=arr)
+        save_text(bad_file, json.dumps(bad, indent=1))
+        good = [c for c in clips if (cache / f"{c['key']}.npz").is_file()
+                and c["key"] not in bad]
+
     skipped = [bad[c["key"]] for c in clips if c["key"] in bad]
     if skipped:
         cfg.say(f"{len(skipped)} clip(s) unusable (no face / too short). "
@@ -507,9 +950,18 @@ def _prep(x):
     return (x.astype(np.float32) / 255.0)[..., None]
 
 
-def fit(X, y, n_classes: int, cfg: Config, seed: int):
+def fit(X, y, n_classes: int, cfg: Config, seed: int,
+        backup: Path | None = None):
     """Fixed number of epochs with cosine decay. No early stopping on purpose:
-    stopping on the held-out speakers would leak them into the result."""
+    stopping on the held-out speakers would leak them into the result.
+
+    [backup] turns on Keras's preemption handling. It is the one way to stop
+    and restart mid-training without changing the result: it restores the
+    weights, the Adam moments and the epoch counter together, so the cosine
+    learning-rate schedule carries on from the right place. Restoring only
+    the weights - the obvious thing to write - would quietly train a
+    different model.
+    """
     import tensorflow as tf
     tf.keras.utils.set_random_seed(seed)
     trainer, exporter = build_model(n_classes)
@@ -523,7 +975,16 @@ def fit(X, y, n_classes: int, cfg: Config, seed: int):
           .shuffle(len(X), seed=seed, reshuffle_each_iteration=True)
           .map(_augment(n_classes), num_parallel_calls=tf.data.AUTOTUNE)
           .batch(cfg.batch).prefetch(tf.data.AUTOTUNE))
-    h = trainer.fit(ds, epochs=cfg.epochs, verbose=0)
+    cbs = []
+    if backup is not None and cfg.checkpoint:
+        try:
+            backup.mkdir(parents=True, exist_ok=True)
+            cbs.append(tf.keras.callbacks.BackupAndRestore(
+                backup_dir=str(backup)))
+        except Exception as e:
+            cfg.say(f"  (checkpointing off: {e})")
+
+    h = trainer.fit(ds, epochs=cfg.epochs, verbose=0, callbacks=cbs)
     return exporter, float(h.history["accuracy"][-1])
 
 
@@ -573,10 +1034,17 @@ def cross_validate(X, y, g, n_classes: int, cfg: Config,
             except Exception as err:
                 cfg.say(f"  fold {f + 1}/{k}: saved copy unusable ({err})")
         if p is None:
-            model, tr_acc = fit(X[tr], y[tr], n_classes, cfg, cfg.seed + f)
+            # Checked again here: the allowance can run out between folds,
+            # and the next fold would silently run on CPU.
+            require_gpu(cfg, f"before fold {f + 1} of {k}")
+            if resume is not None:
+                touch_lock(resume, cfg)
+            model, tr_acc = fit(
+                X[tr], y[tr], n_classes, cfg, cfg.seed + f,
+                backup=None if resume is None else resume / f"backup{f}")
             p, e = predict(model, X[te])
             if done is not None:
-                np.savez_compressed(done, p=p, e=e, idx=te)
+                save_npz(done, p=p, e=e, idx=te)
             cfg.say(f"  fold {f + 1}/{k}: {len(set(g[tr]))} speakers train, "
                     f"{len(set(g[te]))} test -> "
                     f"top-1 {(p.argmax(1) == y[te]).mean():.1%} "
@@ -766,6 +1234,8 @@ def paper_numbers(card: dict, res: dict) -> str:
          "| Quantity | Value |", "|---|---|",
          f"| Speakers | {d['speakers']} |",
          f"| Clips used | {d['clips']} |",
+         f"| Speakers left out, set incomplete | "
+         f"{len(d.get('roster', {}).get('skipped', []))} |",
          f"| Phrases | {len(card['labels'])} |",
          f"| Speakers with repeated takes | {d['multiTakeSpeakers']} |",
          f"| Folds (leave-speakers-out) | {cv['folds']} |",
@@ -790,6 +1260,16 @@ def paper_numbers(card: dict, res: dict) -> str:
                     if v is not None))[:3]
     L += ["", "Hardest phrases: " + ", ".join(f"{k} ({v:.0%})"
                                                 for v, k in worst)]
+    roster = d.get("roster", {})
+    if roster:
+        used = ", ".join(roster.get("speakerIds", [])) or "none"
+        left = ", ".join(r["speaker"] for r in roster.get("skipped", []))
+        L += ["",
+              f"A speaker joins training only once at least "
+              f"{roster.get('minPhrases')} of {roster.get('phraseCount')} "
+              f"phrases of theirs are in Drive.",
+              f"Trained on: {used}.",
+              f"Left out as incomplete: {left or 'none'}."]
     return "\n".join(L) + "\n"
 
 
@@ -822,6 +1302,7 @@ def export(exporter, X, y, spec, data, cv, pers, cfg: Config) -> dict:
         "embeddingDim": EMB_DIM, "alpha": PERS_ALPHA, "tau": PERS_TAU,
         "minConfidence": 0.55, "labels": spec["phrases"],
         "speakers": data["speakers"], "clips": data["clips"],
+        "minPhrases": data.get("roster", {}).get("minPhrases"),
         "top1": cv["top1"] if enough else None,
         "top3": cv["top3"] if enough else None,
         "trainedAt": _dt.datetime.now(_dt.timezone.utc)
@@ -831,6 +1312,7 @@ def export(exporter, X, y, spec, data, cv, pers, cfg: Config) -> dict:
     (out / f"{stem}.json").write_text(
         json.dumps(card, ensure_ascii=False, indent=1), encoding="utf-8")
     res = {"card": stem, "data": data,
+           "speakerIds": data.get("roster", {}).get("speakerIds", []),
            "crossValidation": {k: v for k, v in cv.items()
                                if not k.startswith("_")},
            "personalisation": pers, "tfliteAgreement": agree,
@@ -838,6 +1320,41 @@ def export(exporter, X, y, spec, data, cv, pers, cfg: Config) -> dict:
            "config": {"folds": cfg.folds, "epochs": cfg.epochs,
                       "batch": cfg.batch, "seed": cfg.seed}}
     (out / "results.json").write_text(json.dumps(res, indent=1))
+
+    # Who this model was trained on. Kept beside the model, and appended to
+    # one running history, so months from now it is still possible to say
+    # which speakers any given model version saw.
+    roster = data.get("roster", {})
+    (out / "trained_speakers.json").write_text(
+        json.dumps({
+            "lang": spec["code"],
+            "modelVersion": version,
+            "trainedAt": card["trainedAt"],
+            "minPhrases": roster.get("minPhrases"),
+            "speakerIds": roster.get("speakerIds", []),
+            "used": roster.get("used", []),
+            "skippedIncomplete": roster.get("skipped", []),
+        }, indent=1),
+        encoding="utf-8")
+
+    hist_file = mdir / "speakers_history.json"
+    try:
+        hist = json.loads(hist_file.read_text(encoding="utf-8"))
+        if not isinstance(hist, list):
+            hist = []
+    except Exception:
+        hist = []
+    hist.append({
+        "modelVersion": version,
+        "trainedAt": card["trainedAt"],
+        "minPhrases": roster.get("minPhrases"),
+        "speakers": len(roster.get("speakerIds", [])),
+        "clips": data["clips"],
+        "top1": cv["top1"] if enough else None,
+        "speakerIds": roster.get("speakerIds", []),
+        "skippedIds": [r["speaker"] for r in roster.get("skipped", [])],
+    })
+    hist_file.write_text(json.dumps(hist, indent=1), encoding="utf-8")
     (out / "paper_numbers.md").write_text(paper_numbers(card, res),
                                           encoding="utf-8")
     try:
@@ -885,36 +1402,80 @@ def preprocess_only(cfg: Config) -> dict:
     """Crops every video and stops. Needs no GPU, so run it on a CPU runtime
     and keep the GPU hours for training."""
     root, spec = load_language(cfg)
+    resolve_work_dir(cfg, Path(root))
+    health_check(cfg)
     clips = scan(root, spec, cfg)
     if not clips:
         raise SystemExit(f"No videos found under {root}.")
+    clips, roster = select_speakers(clips, spec, cfg)
     cache = str(Path(cfg.work_dir) / "cache" / cfg.lang)
     clips = preprocess(clips, cache, cfg)
     data = describe(clips, spec, cfg)
+    data["roster"] = roster
     cfg.say("Crops are cached. Switch to a GPU runtime and run the training "
             "cell; it will not redo any of this.")
     return data
 
 
-def run_all(cfg: Config) -> dict:
+def run_all(cfg: Config, force: bool = False) -> dict:
     root, spec = load_language(cfg)
+    resolve_work_dir(cfg, Path(root))
+    health_check(cfg)
     clips = scan(root, spec, cfg)
     if not clips:
         raise SystemExit(f"No videos found under {root}.")
+    # Only complete speakers train; the rest wait for their uploads.
+    clips, roster = select_speakers(clips, spec, cfg)
     cache = str(Path(cfg.work_dir) / "cache" / cfg.lang)
     clips = preprocess(clips, cache, cfg)
     data = describe(clips, spec, cfg)
+    data["roster"] = roster
     X, y, g = load_arrays(clips, cache)
-    return train_and_export(X, y, g, clips, spec, data, cfg)
+    return train_and_export(X, y, g, clips, spec, data, cfg, force=force)
 
 
-def train_and_export(X, y, g, clips, spec, data, cfg: Config) -> dict:
+def train_and_export(X, y, g, clips, spec, data, cfg: Config,
+                     force: bool = False) -> dict:
     n = len(spec["phrases"])
-    resume = Path(cfg.work_dir) / "resume" / cfg.lang / signature(clips, cfg, n)
+    require_gpu(cfg, "before training")
+
+    sig = signature(clips, cfg, n)
+    base = Path(cfg.work_dir) / "resume" / cfg.lang
+    base.mkdir(parents=True, exist_ok=True)
+    resume = base / sig
     resume.mkdir(parents=True, exist_ok=True)
-    kept = len(list(resume.glob("*")))
-    if kept:
-        cfg.say(f"resuming: {kept} finished piece(s) found in {resume}")
+
+    # Work is only reused when the clips AND the settings match. If another
+    # account ran with different settings, say so plainly - otherwise this
+    # looks like starting from scratch for no reason.
+    others = [d for d in base.iterdir() if d.is_dir() and d.name != sig]
+    if others and not any(resume.glob("fold*.npz")):
+        cfg.say("")
+        cfg.say(f"note: {len(others)} earlier run(s) are saved here under "
+                "different settings or a different set of clips.")
+        cfg.say("      They cannot be reused. Every account must use the "
+                "same FOLDS, EPOCHS,")
+        cfg.say("      MIN_PHRASES and seed, and see the same clips in Drive.")
+
+    claim_lock(resume, cfg, force=force)
+    try:
+        return _train_and_export(X, y, g, clips, spec, data, cfg, resume, n)
+    except BaseException:
+        # Whatever went wrong - no GPU, a disconnect, Ctrl-C - the lock must
+        # not outlive this run, or the next account waits forty minutes for
+        # nothing.
+        release_lock(resume)
+        raise
+
+
+def _train_and_export(X, y, g, clips, spec, data, cfg: Config,
+                      resume: Path, n: int) -> dict:
+    done_already = sorted(x.name for x in resume.glob("fold*.npz"))
+    if done_already:
+        cfg.say(f"resuming: {len(done_already)} fold(s) already finished "
+                f"({', '.join(done_already)})")
+    if (resume / "final.weights.h5").is_file():
+        cfg.say("resuming: the final model is already trained")
     if data["speakers"] >= 3:
         cfg.say(f"\ncross-validation, {min(cfg.folds, data['speakers'])} folds "
                 f"x {cfg.epochs} epochs")
@@ -934,18 +1495,29 @@ def train_and_export(X, y, g, clips, spec, data, cfg: Config) -> dict:
                 "speakers": []}
     cfg.say("\nfinal model on every clip")
     weights = resume / "final.weights.h5"
+    exporter = None
     if weights.is_file():
-        _, exporter = build_model(n)
-        exporter.load_weights(str(weights))
-        cfg.say("  already trained in an earlier run - loaded it")
-    else:
-        exporter, _ = fit(X, y, n, cfg, cfg.seed + 100)
+        try:
+            _, exporter = build_model(n)
+            exporter.load_weights(str(weights))
+            cfg.say("  already trained in an earlier run - loaded it")
+        except Exception as e:
+            cfg.say(f"  the saved model could not be read ({e}) - training "
+                    "it again")
+            exporter = None
+            weights.unlink(missing_ok=True)
+    if exporter is None:
+        require_gpu(cfg, "before the final model")
+        touch_lock(resume, cfg)
+        exporter, _ = fit(X, y, n, cfg, cfg.seed + 100,
+                          backup=resume / "backup_final")
         exporter.save_weights(str(weights))
     done = export(exporter, X, y, spec, data, cv, pers, cfg)
     link = None
     if cfg.github_repo and cfg.github_token:
         link = publish_github(done, cfg)
     done["link"] = link
+    release_lock(resume)
     (Path(done["dir"]) / "log.txt").write_text("\n".join(cfg.log),
                                                encoding="utf-8")
     stem = done["stem"]

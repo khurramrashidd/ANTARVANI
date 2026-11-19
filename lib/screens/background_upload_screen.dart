@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app/theme.dart';
+import '../services/auth_service.dart';
 import '../services/background_upload.dart';
 import '../services/sync_service.dart';
 import 'collectors_tab.dart' show agoText;
@@ -34,6 +35,7 @@ class BackgroundUploadCard extends StatefulWidget {
 
 class _BackgroundUploadCardState extends State<BackgroundUploadCard> {
   bool _loading = true;
+  bool _busy = false;
   bool _on = true;
   bool _mobile = true;
   bool _notify = false;
@@ -70,6 +72,83 @@ class _BackgroundUploadCardState extends State<BackgroundUploadCard> {
       _last = last;
       _loading = false;
     });
+  }
+
+  Future<void> _uploadNow() async {
+    setState(() => _busy = true);
+    final msg = await SyncService.instance.uploadNow();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), duration:
+            const Duration(seconds: 6)));
+    await _load();
+  }
+
+  /// Checks the three things that have to agree — the files on this phone,
+  /// the rows in the dashboard, and the upload queue — and says where they
+  /// disagree.
+  Future<void> _rescan() async {
+    setState(() => _busy = true);
+    final r = await SyncService.instance.rescanLocalClips();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _load();
+    if (!mounted) return;
+
+    final admin = AuthService.instance.profile?.isAdmin ?? false;
+    final lines = <String>[
+      if (r.error != null) 'Could not finish: ${r.error}',
+      'Video files on this phone: ${r.filesOnDisk}',
+      'Added to the upload queue: ${r.requeued}',
+      'Already queued: ${r.alreadyQueued}',
+      'Listed as waiting, but the file is gone: ${r.missing}',
+      if (r.orphanFiles > 0)
+        'Files here with no record: ${r.orphanFiles}',
+    ];
+    if (r.missing > 0) {
+      lines.addAll([
+        '',
+        r.nothingHere
+            ? 'None of your clips are on this phone any more. Android '
+                'deletes an app\'s files when the app is uninstalled, and '
+                '"flutter install" uninstalls before it installs. If that is '
+                'what happened, those videos are gone.'
+            : 'Those clips were recorded here but their files are missing.',
+        '',
+        'Marking them as lost keeps the record, with a reason, and stops '
+            'them being counted as waiting for ever.',
+      ]);
+    }
+
+    if (!mounted) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('What is on this phone'),
+        content: SingleChildScrollView(child: Text(lines.join('\n'))),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Close')),
+          if (r.missing > 0 && admin)
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('Mark ${r.missing} as lost'),
+            ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+
+    setState(() => _busy = true);
+    final n = await SyncService.instance
+        .markLost(r.missingDocIds, 'file missing from the phone');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$n clip(s) marked as lost.')));
+    await _load();
   }
 
   @override
@@ -213,17 +292,19 @@ class _BackgroundUploadCardState extends State<BackgroundUploadCard> {
                       style: small?.copyWith(color: Brand.urgent)),
                 ],
                 const SizedBox(height: 12),
-                Row(
+                Wrap(
+                  spacing: 8,
                   children: [
                     FilledButton.icon(
-                      onPressed: () async {
-                        await SyncService.instance.drainQueue();
-                        await _load();
-                      },
+                      onPressed: _busy ? null : _uploadNow,
                       icon: const Icon(Icons.cloud_upload),
-                      label: const Text('Upload now'),
+                      label: Text(_busy ? 'Working…' : 'Upload now'),
                     ),
-                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: _busy ? null : _rescan,
+                      icon: const Icon(Icons.search),
+                      label: const Text('Rescan this phone'),
+                    ),
                     TextButton(
                         onPressed: _load, child: const Text('Refresh')),
                   ],

@@ -5,6 +5,7 @@ import '../app/l10n.dart';
 import '../app/theme.dart';
 import '../services/auth_service.dart';
 import '../services/release_service.dart';
+import '../services/sync_service.dart';
 import '../services/team.dart';
 import '../widgets/common.dart';
 
@@ -67,6 +68,11 @@ class UpdateGateScreen extends StatelessWidget {
                               fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 22),
+                        // A locked phone may still be holding clips. It can
+                        // send them from here — the whole point of the lock
+                        // is to stop recording with an old build, not to
+                        // trap work that is already done.
+                        const _PendingClips(),
                         Card(
                           child: Padding(
                             padding: const EdgeInsets.all(20),
@@ -214,5 +220,80 @@ class _Num extends StatelessWidget {
             ),
           ),
         ],
+      );
+}
+
+/// Clips still on this phone, with a way to send them before updating.
+class _PendingClips extends StatefulWidget {
+  const _PendingClips();
+
+  @override
+  State<_PendingClips> createState() => _PendingClipsState();
+}
+
+class _PendingClipsState extends State<_PendingClips> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: SyncService.instance,
+        builder: (context, _) {
+          final n = SyncService.instance.pendingCount;
+          if (n == 0) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Card(
+              color: Brand.amber.withValues(alpha: 0.95),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$n clip(s) are still on this phone',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Send them before you install the update. Installing '
+                      'over the old app keeps them either way — but do not '
+                      'uninstall the app, because that deletes every clip '
+                      'that has not reached Drive.',
+                      style: TextStyle(height: 1.4),
+                    ),
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  setState(() => _busy = true);
+                                  final m = await SyncService.instance
+                                      .uploadNow();
+                                  if (!mounted) return;
+                                  setState(() => _busy = false);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text(m)));
+                                },
+                          icon: _busy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2))
+                              : const Icon(Icons.cloud_upload),
+                          label: Text(_busy ? 'Uploading…' : 'Upload now'),
+                        ),
+                        Expanded(
+                          child: Text(SyncService.instance.status,
+                              style: const TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       );
 }

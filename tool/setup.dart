@@ -13,6 +13,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'android_frames.dart';
+
 const projectId = 'antarvaani-the-voice';
 const ownerEmail = 'khurramrashid6893@gmail.com';
 const masterEmail = 'khurramrashid0786@gmail.com';
@@ -498,6 +500,33 @@ void writeFirebaseFiles() {
     fixed('firebase.json: added firestore section (this caused "No targets match")');
   }
 
+  // hosting — the project page and the team dashboard.
+  final hosting = fjMap['hosting'];
+  const wantHosting = {
+    'public': 'web/public',
+    'ignore': ['firebase.json', '**/.*', '**/node_modules/**'],
+    'rewrites': [
+      {'source': '/dashboard', 'destination': '/dashboard.html'},
+    ],
+    'headers': [
+      {
+        // Figures and the JSON beside them change every time the notebook
+        // runs; a cached copy would show yesterday's corpus on stage.
+        'source': '/data/**',
+        'headers': [
+          {'key': 'Cache-Control', 'value': 'no-cache, max-age=0'},
+        ],
+      },
+    ],
+  };
+  if (hosting is Map && hosting['public'] == 'web/public') {
+    ok('firebase.json has the hosting section');
+  } else if (Directory('web/public').existsSync()) {
+    fjMap['hosting'] = wantHosting;
+    fj.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(fjMap));
+    fixed('firebase.json: added hosting (web/public)');
+  }
+
   final rf = File('firestore.rules');
   if (rf.existsSync() &&
       rf.readAsStringSync().replaceAll('\r\n', '\n').trim() == rules.trim()) {
@@ -517,6 +546,84 @@ void writeFirebaseFiles() {
   } else {
     ix.writeAsStringSync('{\n  "indexes": [],\n  "fieldOverrides": []\n}\n');
     fixed('firestore.indexes.json created (app needs no composite indexes)');
+  }
+}
+
+/// Copies the web Firebase keys out of firebase_options.dart and into the
+/// website, so the dashboard and the app always point at the same project.
+///
+/// The alternative was asking for the keys to be pasted into a JS file by
+/// hand, which is one typo away from a dashboard that signs in and then
+/// reads nothing, with no obvious reason why.
+///
+/// These keys are not secrets. Every Firebase web app serves them in plain
+/// text; firestore.rules is what actually guards the corpus.
+void writeWebConfig() {
+  final opts = File('lib/firebase_options.dart');
+  if (!opts.existsSync()) return;
+
+  final text = opts.readAsStringSync();
+  final block = RegExp(
+    r'FirebaseOptions\s+web\s*=\s*FirebaseOptions\(([\s\S]*?)\);',
+  ).firstMatch(text);
+  if (block == null) {
+    todo('lib/firebase_options.dart has no web section, so the website '
+        'cannot sign in.\n'
+        '            Run:  flutterfire configure --project=$projectId '
+        '--platforms=android,web');
+    return;
+  }
+
+  final fields = <String, String>{};
+  for (final m in RegExp(r"(\w+)\s*:\s*'([^']*)'").allMatches(block.group(1)!)) {
+    fields[m.group(1)!] = m.group(2)!;
+  }
+  const needed = ['apiKey', 'appId', 'messagingSenderId', 'projectId'];
+  final missing = needed.where((k) => (fields[k] ?? '').isEmpty).toList();
+  if (missing.isNotEmpty) {
+    todo('web Firebase config is missing ${missing.join(', ')} — '
+        'the dashboard will not start');
+    return;
+  }
+
+  // jsonEncode produces a correctly quoted and escaped JavaScript string
+  // literal, which hand-rolled quoting does not.
+  String q(String k, [String fallback = '']) => jsonEncode(fields[k] ?? fallback);
+
+  final out = StringBuffer()
+    ..writeln('/* Firebase keys for the web dashboard.')
+    ..writeln(' *')
+    ..writeln(' * WRITTEN BY `setup` from lib/firebase_options.dart.')
+    ..writeln(' * Do not edit by hand: the next setup overwrites it.')
+    ..writeln(' *')
+    ..writeln(' * These keys are not secret — every Firebase web app ships')
+    ..writeln(' * them in plain sight. firestore.rules is what keeps the')
+    ..writeln(' * corpus readable only by a signed-in team member.')
+    ..writeln(' */')
+    ..writeln('window.FIREBASE_CONFIG = {')
+    ..writeln('  apiKey: ${q('apiKey')},')
+    ..writeln('  authDomain: ${q('authDomain', '$projectId.firebaseapp.com')},')
+    ..writeln('  projectId: ${q('projectId')},')
+    ..writeln('  storageBucket: ${q('storageBucket')},')
+    ..writeln('  messagingSenderId: ${q('messagingSenderId')},')
+    ..writeln('  appId: ${q('appId')},');
+  if ((fields['measurementId'] ?? '').isNotEmpty) {
+    out.writeln('  measurementId: ${q('measurementId')},');
+  }
+  out.writeln('};');
+
+  final f = File('web/public/assets/firebase-config.js');
+  if (!f.parent.existsSync()) {
+    info('web/public/assets is missing — skipping the website config');
+    return;
+  }
+  final was = f.existsSync() ? f.readAsStringSync() : '';
+  if (was.trim() == out.toString().trim()) {
+    ok('website Firebase config matches the app');
+  } else {
+    f.writeAsStringSync(out.toString());
+    fixed('web/public/assets/firebase-config.js written from '
+        'firebase_options.dart');
   }
 }
 
@@ -639,7 +746,12 @@ Future<String?> checkAndroidApp() async {
   info('applicationId: $pkg');
 
   final opts = File('lib/firebase_options.dart');
-  final optsOk = opts.existsSync() && opts.readAsStringSync().contains(projectId);
+  final optsText = opts.existsSync() ? opts.readAsStringSync() : '';
+  // The website signs in against the same project, so the web app has to be
+  // registered as well. Without it there is no web appId and the dashboard
+  // cannot start Firebase at all.
+  final optsOk = optsText.contains(projectId) &&
+      optsText.contains('FirebaseOptions web =');
   var client = gsFile.existsSync() ? gsClient(pkg) : null;
 
   if (optsOk && client != null) {
@@ -650,7 +762,7 @@ Future<String?> checkAndroidApp() async {
       ...flutterfireCmd.skip(1),
       'configure',
       '--project=$projectId',
-      '--platforms=android',
+      '--platforms=android,web',
       '--yes',
     ]);
     client = gsFile.existsSync() ? gsClient(pkg) : null;
@@ -658,7 +770,7 @@ Future<String?> checkAndroidApp() async {
       fixed('flutterfire configure registered the Android app');
     } else {
       bad('flutterfire configure did not finish. Run it yourself:\n'
-          '            flutterfire configure --project=$projectId --platforms=android');
+          '            flutterfire configure --project=$projectId --platforms=android,web');
       return null;
     }
   }
@@ -672,8 +784,10 @@ Future<String?> checkAndroidApp() async {
   if (gradleText.contains('com.google.gms.google-services')) {
     ok('google-services Gradle plugin applied');
   } else {
-    bad('google-services Gradle plugin missing. Run:  flutterfire configure --project=$projectId --platforms=android');
+    bad('google-services Gradle plugin missing. Run:  flutterfire configure --project=$projectId --platforms=android,web');
   }
+
+  writeWebConfig();
 
   return client['client_info']['mobilesdk_app_id'] as String;
 }
@@ -950,6 +1064,34 @@ void fixAndroidFiles() {
   final g = gradle.first;
   var s = g.readAsStringSync();
   final before = s;
+
+  // ---- The Kotlin half of frame extraction. Speak records a video and
+  // reads the mouth out of the file; Flutter cannot decode an .mp4 itself,
+  // so Android's MediaMetadataRetriever does it behind a method channel.
+  const pkgPath = 'android/app/src/main/kotlin/com/silentvoice/'
+      'silent_voice_recorder';
+  final kotlinDir = Directory(pkgPath);
+  if (!kotlinDir.existsSync()) {
+    kotlinDir.createSync(recursive: true);
+  }
+  for (final f in [
+    ['FrameExtractor.kt', kFrameExtractorKt],
+    ['MainActivity.kt', kMainActivityKt],
+  ]) {
+    final name = f[0];
+    final path = '$pkgPath/$name';
+    final file = File(path);
+    final want = f[1].trim();
+    final have = file.existsSync() ? file.readAsStringSync().trim() : '';
+    if (have == want) {
+      ok('$name is up to date');
+    } else {
+      if (have.isNotEmpty) File('$path.antarvani.bak').writeAsStringSync(have);
+      file.writeAsStringSync('$want\n');
+      fixed('$name written'
+          '${have.isEmpty ? '' : ' (old one kept as .antarvani.bak)'}');
+    }
+  }
 
   // ---- R8 rules. The TensorFlow Lite library refers to an optional GPU
   // class that is not shipped; without this a release build stops with

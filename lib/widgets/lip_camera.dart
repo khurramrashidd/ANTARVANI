@@ -1,13 +1,16 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import '../app/l10n.dart';
 import '../app/theme.dart';
+import 'dart:io';
+
+import '../services/camera_image.dart';
 import '../services/lip_reader.dart';
 import '../services/model_service.dart';
+import '../services/video_frames.dart';
 
 /// The front camera with a lip guide, able to capture one clip's worth of
 /// frames for the recogniser. Used by Speak and by Personalise.
@@ -26,7 +29,8 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
   bool _failed = false;
   bool _busy = false;
   bool _opening = false;
-  int _countdown = 0;
+  int _countdownN = 0;
+  bool _reading = false;
   double _progress = 0;
 
   bool get ready => _cam != null && _cam!.value.isInitialized && !_busy;
@@ -35,6 +39,8 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Settles which capture path to use before the person taps Start.
+    unawaited(VideoFrames.probe());
     _open();
   }
 
@@ -94,25 +100,94 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
     }
   }
 
-  /// Counts down, then collects [card.frames] frames at [card.fps]. Returns
-  /// the frames and the sensor orientation, or null if the camera is not
-  /// available.
+  /// Counts down, then captures one clip's worth of frames.
+  ///
+  /// It records a real video first and reads the frames back out of the file,
+  /// which is exactly how the training clips were made. If that path is not
+  /// available on this phone it falls back to the live preview stream, which
+  /// is how this worked before and still works — just at preview quality.
   Future<(List<RawFrame>, int)?> capture(ModelCard card) async {
     final cam = _cam;
     if (cam == null || !cam.value.isInitialized || _busy) return null;
+
+    if (!VideoFrames.unavailable) {
+      final shot = await _captureVideo(card, cam);
+      if (shot != null) return shot;
+    }
+    return _captureLive(card, cam);
+  }
+
+  /// Records [card.windowSeconds] of video, pulls the frames out, then throws
+  /// the file away. Nothing is kept: this is recognition, not collection.
+  Future<(List<RawFrame>, int)?> _captureVideo(
+      ModelCard card, CameraController cam) async {
+    if (_busy) return null;
+    setState(() => _busy = true);
+    File? file;
+    try {
+      await _countdown();
+      if (!mounted) return null;
+      setState(() => _progress = 0);
+
+      await cam.startVideoRecording();
+      final windowMs = (card.windowSeconds * 1000).round();
+      final started = DateTime.now();
+      while (DateTime.now().difference(started).inMilliseconds < windowMs) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        if (!mounted) break;
+        setState(() => _progress =
+            DateTime.now().difference(started).inMilliseconds / windowMs);
+      }
+      final shot = await cam.stopVideoRecording();
+      file = File(shot.path);
+
+      if (mounted) setState(() => _reading = true);
+      final frames = await VideoFrames.read(
+        shot.path,
+        count: card.frames,
+        stepMs: (1000 / card.fps).round(),
+        onProgress: (p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      return frames;
+    } catch (e) {
+      debugPrint('video capture failed: $e');
+      return null;
+    } finally {
+      try {
+        if (file != null && file.existsSync()) file.deleteSync();
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _reading = false;
+          _countdownN = 0;
+          _progress = 0;
+        });
+      }
+    }
+  }
+
+  Future<void> _countdown() async {
+    for (var n = 3; n >= 1; n--) {
+      if (!mounted) return;
+      setState(() => _countdownN = n);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+    }
+    if (mounted) setState(() => _countdownN = 0);
+  }
+
+  /// The original path: frames straight off the preview stream.
+  Future<(List<RawFrame>, int)?> _captureLive(
+      ModelCard card, CameraController cam) async {
+    if (_busy) return null;
     setState(() => _busy = true);
     final frames = <RawFrame>[];
     try {
-      for (var n = 3; n >= 1; n--) {
-        if (!mounted) return null;
-        setState(() => _countdown = n);
-        await Future<void>.delayed(const Duration(milliseconds: 700));
-      }
+      await _countdown();
       if (!mounted) return null;
-      setState(() {
-        _countdown = 0;
-        _progress = 0;
-      });
+      setState(() => _progress = 0);
 
       final stepMs = 1000.0 / card.fps;
       final windowMs = card.frames * stepMs;
@@ -123,13 +198,9 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
         clock ??= Stopwatch()..start();
         final ms = clock!.elapsedMilliseconds;
         if (frames.length < card.frames && ms >= frames.length * stepMs) {
-          final plane = img.planes.first;
-          frames.add(RawFrame(
-            Uint8List.fromList(plane.bytes),
-            img.width,
-            img.height,
-            plane.bytesPerRow >= img.width ? plane.bytesPerRow : img.width,
-          ));
+          // Packed here, not taken from the first plane: see camera_image.dart.
+          final f = nv21FrameOf(img);
+          frames.add(RawFrame(f.bytes, f.width, f.height, f.rowStride));
           if (mounted && frames.length % 4 == 0) {
             setState(() => _progress = frames.length / card.frames);
           }
@@ -151,7 +222,7 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _busy = false;
-          _countdown = 0;
+          _countdownN = 0;
           _progress = 0;
         });
       }
@@ -162,7 +233,7 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final cam = _cam;
     final live = cam != null && cam.value.isInitialized;
-    final recording = _busy && _countdown == 0;
+    final recording = _busy && _countdownN == 0 && !_reading;
     return AspectRatio(
       aspectRatio: 3 / 4,
       child: ClipRRect(
@@ -214,18 +285,20 @@ class LipCameraState extends State<LipCamera> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  _countdown > 0
-                      ? tr('speak_get_ready')
-                      : recording
-                          ? tr('speak_now')
-                          : tr('speak_waiting'),
+                  _reading
+                      ? tr('speak_reading')
+                      : _countdownN > 0
+                          ? tr('speak_get_ready')
+                          : recording
+                              ? tr('speak_now')
+                              : tr('speak_waiting'),
                   style: const TextStyle(color: Colors.white),
                 ),
               ),
             ),
-            if (_countdown > 0)
+            if (_countdownN > 0)
               Center(
-                child: Text('$_countdown',
+                child: Text('$_countdownN',
                     style: const TextStyle(
                         color: Colors.white,
                         fontSize: 96,

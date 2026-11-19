@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANTARVANI — a camera is the only sensor</title>
+<meta name="description" content="ANTARVANI reads twenty spoken Hindi care phrases from the movement of the mouth alone, on an ordinary Android phone. No microphone, no electrodes, no wearables.">
+<meta name="theme-color" content="#07080c">
+<meta property="og:title" content="ANTARVANI — a camera is the only sensor">
+<meta property="og:description" content="Silent speech recognition for twenty Hindi care phrases, running entirely on an ordinary Android phone.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%236366f1'/><path d='M14 32c6-9 12-13 18-13s12 4 18 13c-6 9-12 13-18 13s-12-4-18-13z' fill='none' stroke='%23fff' stroke-width='4' stroke-linejoin='round'/><circle cx='32' cy='32' r='5' fill='%23fff'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;650&family=Space+Grotesk:wght@500;600;700&family=Noto+Serif+Devanagari:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+/* Theme before first paint, so a remembered dark never flashes light.
+   Light is the default; dark is only used if it was asked for here. */
+(function () {
+  try {
+    if (localStorage.getItem('antarvani-theme') === 'dark')
+      document.documentElement.dataset.theme = 'dark';
+  } catch (e) {}
+  document.documentElement.classList.add('js');
+})();
+</script>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top">ANTARVANI <span>· अन्तर्वाणी</span></a>
+    <div class="nav-links">
+      <a href="#problem">Problem</a>
+      <a href="#phrases">Phrases</a>
+      <a href="#how">How it works</a>
+      <a href="#corpus">Corpus</a>
+      <a href="#model">Model</a>
+      <a href="#results">Results</a>
+      <a href="#ethics">Ethics</a>
+      <a href="#team">Team</a>
+      <a class="btn btn-sm" href="dashboard.html" style="margin-left:6px">Team sign-in</a>
+      <button class="theme" id="themeBtn" type="button" aria-pressed="false" title="Switch to dark">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span class="sr">Toggle dark mode</span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero wrap" id="top">
+  <div class="pill"><span class="dot"></span> Final-year major project · Amity University Mumbai</div>
+  <h1>A camera is<br>the only sensor.</h1>
+  <p class="deva">अन्तर्वाणी — the voice within</p>
+  <p class="tagline">Twenty Hindi care phrases, read from the movement of the mouth alone.</p>
+  <p class="lede sub">
+    People who cannot speak — after a laryngectomy, with a tracheostomy, during
+    intensive care — are often left pointing at a card. ANTARVANI reads the
+    phrase off their lips with an ordinary Android phone. No microphone, no
+    electrodes, nothing worn on the face.
+  </p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#how">How it works</a>
+    <a class="btn" href="#corpus">See the corpus</a>
+  </div>
+
+  <div class="strip" id="strip" hidden>
+    <div class="strip-rail" id="stripRail"></div>
+    <div class="strip-note">
+      <span>what the model actually receives — 88×88 greyscale, 16 fps</span>
+      <span id="stripWho"></span>
+    </div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">The problem</div>
+      <h2>Losing speech does not mean losing language.</h2>
+      <p class="lede">
+        The words are still there. What is missing is a way out of the body
+        that other people can hear — and the tools meant to help are mostly
+        built for English, for a keyboard, or for a sensor nobody wants taped
+        to their throat.
+      </p>
+    </div>
+    <div class="grid g3">
+      <div class="card rise">
+        <h3><span class="ix">01</span> Boards are slow</h3>
+        <p>Pointing at a laminated card gets a thirsty patient a glass of water in
+           the time it takes to find the picture. Most boards carry a dozen
+           symbols and nothing a person would actually say.</p>
+      </div>
+      <div class="card rise">
+        <h3><span class="ix">02</span> Sensors are intrusive</h3>
+        <p>Surface electrodes, throat microphones and ultrasound probes all work,
+           and all require equipment on the face or neck of someone already
+           having a hard day.</p>
+      </div>
+      <div class="card rise">
+        <h3><span class="ix">03</span> Hindi is underserved</h3>
+        <p>Published lip-reading corpora are overwhelmingly English. A hospital
+           ward in Maharashtra needs the phrases people there say, in the
+           language they say them in.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="phrases">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">The vocabulary</div>
+      <h2>Twenty phrases that matter at a bedside.</h2>
+      <p class="lede">
+        Chosen for need, not for how easy they are to tell apart. Each is a whole
+        utterance, recorded in a fixed three-second window, so the model learns a
+        phrase rather than stitching one together from letters.
+      </p>
+    </div>
+    <div class="grid phrase-grid" id="phraseGrid"></div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">How it works</div>
+      <h2>Camera to phrase, entirely on the phone.</h2>
+      <p class="lede">
+        Nothing is uploaded at the moment of use, and no audio is captured at any
+        stage of the project — not during collection, not during inference.
+      </p>
+    </div>
+    <div class="flow">
+      <div class="step rise"><div class="k">STEP 1</div><h4>Record</h4>
+        <p>Three seconds from the front camera. The microphone is never opened.</p></div>
+      <div class="step rise"><div class="k">STEP 2</div><h4>Find the face</h4>
+        <p>MediaPipe returns 468 landmarks per frame, on device.</p></div>
+      <div class="step rise"><div class="k">STEP 3</div><h4>Align and crop</h4>
+        <p>The box is rotated to level the eyes and scaled by the distance between
+           them, so the mouth fills the same area whatever the camera distance.</p></div>
+      <div class="step rise"><div class="k">STEP 4</div><h4>Recognise</h4>
+        <p>48 frames of 88×88 greyscale through a 3D CNN, 3.56 MB as TFLite.</p></div>
+      <div class="step rise"><div class="k">STEP 5</div><h4>Personalise</h4>
+        <p>The result is blended with prototypes built from a handful of the
+           user's own recordings.</p></div>
+      <div class="step rise"><div class="k">STEP 6</div><h4>Speak</h4>
+        <p>The phrase is read aloud in Hindi by the phone.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="corpus">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">The corpus</div>
+      <h2>Recorded by us, from scratch.</h2>
+      <p class="lede">
+        No dataset existed for this, so we built one — with a purpose-made
+        Android app that handles consent, speaker numbering, quality checks and
+        upload, so every clip arrives named, attributed and verifiable.
+      </p>
+    </div>
+    <div class="stats g4" id="corpusStats"></div>
+    <div class="grid figs" id="corpusFigs" style="margin-top:22px"></div>
+  </div>
+</section>
+
+<section id="model">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">The model</div>
+      <h2>Small enough to live on the phone.</h2>
+      <p class="lede">
+        Five strided 3D convolutions reduce the clip in space and time, two 1D
+        convolutions read across what is left, and a global average gives a
+        192-dimensional embedding. No MaxPool3D and no recurrent layer: TFLite
+        supports neither, and a model that cannot be converted cannot ship.
+      </p>
+    </div>
+    <div class="stats g4" style="margin-bottom:22px">
+      <div class="stat"><div class="n">1.78 M</div><div class="l">parameters</div></div>
+      <div class="stat"><div class="n">3.56 MB</div><div class="l">on disk, float16 TFLite</div></div>
+      <div class="stat"><div class="n">192-d</div><div class="l">embedding used for personalisation</div></div>
+      <div class="stat plain"><div class="n">0</div><div class="l">bytes of audio, at any stage</div></div>
+    </div>
+    <div class="grid figs" id="modelFigs"></div>
+
+    <div class="grid g2" style="margin-top:26px">
+      <div class="card rise">
+        <h3>Few-shot personalisation</h3>
+        <p>A model that has never met you is guessing at a face it has not seen.
+           Ours builds a prototype per phrase from a few of the user's own clips
+           and blends it with the general model's embedding. This is the part of
+           the project we are putting forward as the contribution, and it is what
+           makes a 20-phrase vocabulary workable for one real person rather than
+           for an average of thirty.</p>
+      </div>
+      <div class="card rise">
+        <h3>Updating without a new install</h3>
+        <p>Retrained models are published from the training notebook and picked
+           up over the air: the app verifies a SHA-256 checksum, swaps the model
+           in and carries on. No store release, no reinstall, and no clip waiting
+           on a phone is ever lost to an update.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="results">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Results</div>
+      <h2 id="resultsHead">Where it stands.</h2>
+      <p class="lede" id="resultsLede">
+        Every number on this page comes out of the training run itself. Nothing
+        here is typed in by hand.
+      </p>
+    </div>
+    <div id="resultsBody"></div>
+  </div>
+</section>
+
+<section id="ethics">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Ethics and privacy</div>
+      <h2>Rules we set before the first recording.</h2>
+    </div>
+    <div class="grid g2">
+      <div class="card rise">
+        <h3>No audio, ever</h3>
+        <p>The microphone is not opened during collection or during use. A silent
+           speech interface that records sound would be collecting exactly the
+           thing its users cannot produce, and exactly the thing a ward has no
+           right to capture.</p>
+      </div>
+      <div class="card rise">
+        <h3>Consent, per person</h3>
+        <p>Every volunteer signs a numbered consent form before recording, and
+           separately decides whether their clips may ever be published. Nobody
+           under eighteen is recorded. A volunteer can ask for their recordings
+           to be deleted from inside the app, and the deletion is logged.</p>
+      </div>
+      <div class="card rise">
+        <h3>Names are not data</h3>
+        <p>Volunteers appear here and in every export as a speaker number. Names
+           live in a private roster the team signs in to see. They are never in
+           the dataset manifest and never on this page.</p>
+      </div>
+      <div class="card rise">
+        <h3>The phone, not the cloud</h3>
+        <p>Recognition runs on the device. Clips are uploaded only during corpus
+           collection, to a folder the project controls, and never at the moment
+           somebody is using the app to say they are in pain.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="team">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="eyebrow">Who built it</div>
+      <h2>Team</h2>
+    </div>
+    <div class="grid g4">
+      <div class="card person rise"><div class="av">KR</div><div class="nm">Khurram Rashid</div><div class="rl">App, pipeline, infrastructure</div></div>
+      <div class="card person rise"><div class="av">KZ</div><div class="nm">Kinza Zahra</div><div class="rl">Corpus and evaluation</div></div>
+      <div class="card person rise"><div class="av">PP</div><div class="nm">Prapti Patil</div><div class="rl">Collection and quality control</div></div>
+      <div class="card person rise"><div class="av">SD</div><div class="nm">Shreya Deshpande</div><div class="rl">Phrase design and analysis</div></div>
+    </div>
+    <div class="card rise" style="margin-top:18px;text-align:center">
+      <div class="rl" style="color:var(--ink-3);font-size:.82rem">Project guide</div>
+      <div class="nm" style="font-size:1.05rem;margin-top:4px">Dr. Sarang M. Patil</div>
+      <div class="rl" style="color:var(--ink-3);font-size:.85rem">Associate Professor, Amity University Mumbai</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <span>ANTARVANI · B.Tech CSE major project · Amity University Mumbai</span>
+    <span id="builtAt"></span>
+  </div>
+</footer>
+
+<div class="lb" id="lb" role="dialog" aria-modal="true" aria-label="Enlarged figure">
+  <button class="lb-close" id="lbClose" aria-label="Close">×</button>
+  <img id="lbImg" alt="">
+</div>
+
+<script src="assets/theme.js"></script>
+<script src="assets/phrases.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

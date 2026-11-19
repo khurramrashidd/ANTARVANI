@@ -517,6 +517,16 @@ const Map<String, Map<String, String>> _s = {
     'mr': 'असे म्हणायचे नव्हते?',
   },
   'speak_again': {'en': 'Speak again', 'hi': 'फिर बोलें', 'mr': 'पुन्हा बोला'},
+  'speak_try_anyway': {
+    'en': 'Read it anyway',
+    'hi': 'फिर भी पढ़ें',
+    'mr': 'तरीही वाचा',
+  },
+  'speak_guessed': {
+    'en': 'Read without finding your face — this guess is less reliable.',
+    'hi': 'चेहरा पहचाने बिना पढ़ा गया — यह अनुमान कम भरोसेमंद है।',
+    'mr': 'चेहरा न ओळखता वाचले — हा अंदाज कमी विश्वासार्ह आहे.',
+  },
   'speak_model_info': {
     'en': '{lang} model, version {v}',
     'hi': '{lang} मॉडल, संस्करण {v}',

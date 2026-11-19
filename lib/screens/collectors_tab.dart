@@ -742,8 +742,13 @@ class _MyUploadWarningState extends State<MyUploadWarning> {
 
   Future<void> _retry() async {
     setState(() => _busy = true);
-    await SyncService.instance.drainQueue();
-    if (mounted) setState(() => _busy = false);
+    // Repairs the queue first: after a reinstall the dashboard can say
+    // clips are waiting while the phone's own queue is empty.
+    final msg = await SyncService.instance.uploadNow();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), duration: const Duration(seconds: 6)));
   }
 
   @override

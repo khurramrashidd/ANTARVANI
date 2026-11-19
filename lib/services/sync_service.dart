@@ -27,7 +27,101 @@ class ClipRef {
   const ClipRef({required this.docId, this.driveFileId, this.ownerEmail});
 }
 
+/// One clip, enough of it to move the file and fix its record afterwards.
+class MoveRef {
+  final String docId;
+  final String driveFileId;
+  final String phraseId;
+
+  /// The account that uploaded it. Drive lets that account move the file and
+  /// refuses everyone else, so this is who has to finish the job.
+  final String? ownerEmail;
+
+  const MoveRef({
+    required this.docId,
+    required this.driveFileId,
+    required this.phraseId,
+    this.ownerEmail,
+  });
+}
+
+/// Which part of the corpus a clip should sit in.
+enum CorpusZone {
+  /// P01..P20 — what the training pipeline reads.
+  corpus,
+
+  /// _in_progress/<speaker> — recorded, but the session is not finished.
+  holding,
+
+  /// _rejected — thrown out, kept for the QC numbers in the paper.
+  rejected,
+}
+
+/// What a batch of file moves managed to do.
+class MoveReport {
+  final int moved;
+  final int notAllowed;
+  final int notFound;
+  final int failed;
+
+  /// Accounts that have to open the app and move their own clips.
+  final List<String> blockedOwners;
+  final String? error;
+
+  const MoveReport({
+    this.moved = 0,
+    this.notAllowed = 0,
+    this.notFound = 0,
+    this.failed = 0,
+    this.blockedOwners = const [],
+    this.error,
+  });
+
+  const MoveReport.blocked(String why) : this(error: why);
+
+  bool get ok => error == null && failed == 0 && notAllowed == 0;
+  int get total => moved + notAllowed + notFound + failed;
+
+  /// One line a person can act on.
+  String get summary {
+    if (error != null) return error!;
+    if (total == 0) return 'Nothing to move.';
+    final parts = <String>['$moved moved'];
+    if (notAllowed > 0) {
+      parts.add('$notAllowed belong to '
+          '${blockedOwners.isEmpty ? "another account" : blockedOwners.join(", ")} '
+          'and must be moved from their phone');
+    }
+    if (notFound > 0) parts.add('$notFound are no longer in Drive');
+    if (failed > 0) parts.add('$failed failed');
+    return parts.join('; ');
+  }
+}
+
 /// What a whole-recording deletion managed to do.
+/// What a rescan of this phone found.
+class RescanReport {
+  final int filesOnDisk;
+  final int requeued;
+  final int alreadyQueued;
+  final int missing;
+  final List<String> missingDocIds;
+  final int orphanFiles;
+  final String? error;
+
+  const RescanReport({
+    this.filesOnDisk = 0,
+    this.requeued = 0,
+    this.alreadyQueued = 0,
+    this.missing = 0,
+    this.missingDocIds = const [],
+    this.orphanFiles = 0,
+    this.error,
+  });
+
+  bool get nothingHere => filesOnDisk == 0 && missing > 0;
+}
+
 class DeleteReport {
   final bool ok;
   final String? error;
@@ -197,6 +291,7 @@ class SyncService extends ChangeNotifier {
 
   /// Marks a speaker in_progress / complete / cancelled.
   Future<void> setSpeakerStatus(String speakerId, String status) async {
+    _completeCache.remove(speakerId);
     try {
       await speakers.doc(speakerId).set({
         'status': status,
@@ -204,6 +299,141 @@ class SyncService extends ChangeNotifier {
       }, SetOptions(merge: true));
     } catch (e) {
       debugPrint('speaker status failed: $e');
+    }
+  }
+
+  /// Takes a whole session out of the corpus without destroying it.
+  ///
+  /// Two different things were being conflated before: a session that is no
+  /// good, and a number that should go back into the pool. A rejected session
+  /// keeps its row and its number — the clips stay where they are, the
+  /// volunteer can re-record, and master can put it back with
+  /// [restoreSpeaker]. Counting it out of every total is enough to make the
+  /// numbers honest; nothing has to be deleted to achieve that.
+  ///
+  /// To get the number back as well, use [deleteSpeakerCompletely], which
+  /// removes the clips first so none are orphaned.
+  Future<void> rejectSpeaker(String speakerId, String why) async {
+    _completeCache.remove(speakerId);
+    await speakers.doc(speakerId).set({
+      'status': 'rejected',
+      'rejectedReason': why,
+      'rejectedBy': Team.email,
+      'rejectedAt': FieldValue.serverTimestamp(),
+      'statusAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Puts a rejected session back, for when the volunteer has re-recorded.
+  ///
+  /// The status returned is worked out from what is actually there now, not
+  /// from what it was before it was rejected: a session that is short of its
+  /// target comes back as in_progress so it shows up under "Unfinished"
+  /// instead of quietly counting as done.
+  Future<void> restoreSpeaker(String speakerId,
+      {required bool complete}) async {
+    _completeCache.remove(speakerId);
+    await speakers.doc(speakerId).set({
+      'status': complete ? 'complete' : 'in_progress',
+      'rejectedReason': FieldValue.delete(),
+      'rejectedBy': FieldValue.delete(),
+      'rejectedAt': FieldValue.delete(),
+      'restoredBy': Team.email,
+      'restoredAt': FieldValue.serverTimestamp(),
+      'statusAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  // ------------------------------------------------------------------
+  //  Moving clips between the parts of the corpus
+  // ------------------------------------------------------------------
+  /// Moves one speaker's files into [zone] and fixes their records.
+  ///
+  /// Drive only lets the account that uploaded a file move it. That is not
+  /// an error to hide: the clips that could not be moved are counted and
+  /// their owners named, so the right person can be asked. Everything that
+  /// could move, moves — one refusal never stops the rest.
+  Future<MoveReport> moveSpeakerClips({
+    required String speakerId,
+    required CorpusZone zone,
+    required List<MoveRef> clips,
+  }) async {
+    if (clips.isEmpty) return const MoveReport();
+    if (!drive.signedIn && !await drive.connect(interactive: false)) {
+      return const MoveReport.blocked(
+          'Connect Drive first — the files have to move before this takes '
+          'effect.');
+    }
+
+    var moved = 0, notAllowed = 0, notFound = 0, failed = 0;
+    final blocked = <String>{};
+    final done = <String>[];
+
+    for (final c in clips) {
+      final outcome = switch (zone) {
+        CorpusZone.corpus =>
+          await drive.moveIntoCorpus(c.driveFileId, c.phraseId),
+        CorpusZone.holding =>
+          await drive.moveIntoHolding(c.driveFileId, speakerId),
+        CorpusZone.rejected =>
+          await drive.reject(c.driveFileId) ? DriveMoveOutcome.moved : DriveMoveOutcome.failed,
+      };
+      switch (outcome) {
+        case DriveMoveOutcome.moved:
+          moved++;
+          done.add(c.docId);
+        case DriveMoveOutcome.notAllowed:
+          notAllowed++;
+          if (c.ownerEmail != null && c.ownerEmail!.isNotEmpty) {
+            blocked.add(c.ownerEmail!);
+          }
+        case DriveMoveOutcome.notFound:
+          notFound++;
+        case DriveMoveOutcome.failed:
+          failed++;
+      }
+    }
+
+    // One flag per clip, so the dashboard knows what is still in the holding
+    // folder without listing Drive every time it draws.
+    if (done.isNotEmpty) {
+      try {
+        final batch = _db.batch();
+        for (final id in done) {
+          batch.set(this.clips.doc(id), {
+            'inCorpus': zone == CorpusZone.corpus,
+            'movedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        await batch.commit();
+      } catch (e) {
+        debugPrint('move bookkeeping failed: $e');
+      }
+    }
+
+    notifyListeners();
+    return MoveReport(
+      moved: moved,
+      notAllowed: notAllowed,
+      notFound: notFound,
+      failed: failed,
+      blockedOwners: blocked.toList()..sort(),
+    );
+  }
+
+  /// Writes the rejected-speaker list the notebook reads, from whatever is
+  /// rejected right now. Called after every reject and every restore, so the
+  /// file on Drive is never a guess about what the dashboard shows.
+  Future<bool> publishSkipList() async {
+    try {
+      final snap = await speakers.where('status', isEqualTo: 'rejected').get();
+      if (!drive.signedIn && !await drive.connect(interactive: false)) {
+        return false;
+      }
+      return await drive.writeSkipList(snap.docs.map((d) => d.id));
+    } catch (e) {
+      debugPrint('skip list failed: $e');
+      return false;
     }
   }
 
@@ -386,6 +616,10 @@ class SyncService extends ChangeNotifier {
       }
       await batch.commit();
       await IdAllocator.release([speakerId]);
+      // The number goes back into the pool, so it may belong to somebody
+      // else tomorrow. A leftover line in the skip list would quietly keep
+      // that new volunteer out of training.
+      unawaited(publishSkipList());
     } catch (e) {
       return DeleteReport.blocked(
           'The videos were handled, but clearing the records failed: $e');
@@ -514,6 +748,127 @@ class SyncService extends ChangeNotifier {
     unawaited(_touchDevice());
   }
 
+  /// Rebuilds the upload queue from what is actually on this phone.
+  ///
+  /// Three things have to agree: the files on disk, the rows in Firestore,
+  /// and the queue in the phone's settings. They can drift apart — most
+  /// easily by reinstalling the app, which wipes the files and the queue but
+  /// leaves the rows, so the dashboard says clips are waiting while the
+  /// phone has nothing to send and the upload button does nothing.
+  ///
+  /// So nothing here trusts the queue. It walks the disk, reads this
+  /// person's unuploaded rows, and rebuilds the queue from the files that
+  /// are really there. Rows whose file has gone are reported, not deleted:
+  /// that is a decision for a person, not for a repair routine.
+  Future<RescanReport> rescanLocalClips() async {
+    try {
+      final dir = await Storage.dataDir();
+      final onDisk = <String, File>{};
+      if (dir.existsSync()) {
+        for (final e in dir.listSync(recursive: true)) {
+          if (e is File && e.path.toLowerCase().endsWith('.mp4')) {
+            onDisk[e.uri.pathSegments.last] = e;
+          }
+        }
+      }
+
+      final me = Team.email ?? '';
+      if (me.isEmpty) {
+        return RescanReport(
+            filesOnDisk: onDisk.length, error: 'Not signed in.');
+      }
+
+      final q = await _readQueue();
+      final queued = {for (final e in q) e['docId'] as String};
+
+      final snap = await clips.where('collectorEmail', isEqualTo: me).get();
+      var requeued = 0, already = 0, missing = 0;
+      final missingIds = <String>[];
+      final matched = <String>{};
+
+      for (final d in snap.docs) {
+        final m = d.data();
+        if (m['uploaded'] == true) continue;
+        if ((m['status'] as String? ?? 'ok') != 'ok') continue;
+        final name = m['fileName'] as String? ?? '';
+        final f = onDisk[name];
+        if (f == null) {
+          missing++;
+          missingIds.add(d.id);
+          continue;
+        }
+        matched.add(name);
+        if (queued.contains(d.id)) {
+          already++;
+          continue;
+        }
+        q.add({
+          'docId': d.id,
+          'localPath': f.path,
+          'fileName': name,
+          'speakerId': '${m['speakerId'] ?? ''}',
+        });
+        requeued++;
+      }
+
+      if (requeued > 0) await _writeQueue(q);
+      return RescanReport(
+        filesOnDisk: onDisk.length,
+        requeued: requeued,
+        alreadyQueued: already,
+        missing: missing,
+        missingDocIds: missingIds,
+        orphanFiles: onDisk.length - matched.length,
+      );
+    } catch (e) {
+      debugPrint('rescan failed: $e');
+      return RescanReport(error: '$e');
+    }
+  }
+
+  /// Marks clips whose file no longer exists, so they stop being counted as
+  /// waiting for ever. The rows are kept, with a reason, rather than deleted.
+  Future<int> markLost(List<String> docIds, String why) async {
+    var n = 0;
+    for (final id in docIds) {
+      try {
+        await clips.doc(id).set({
+          'status': 'lost',
+          'lostReason': why,
+          'lostBy': Team.email,
+          'lostAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        n++;
+      } catch (e) {
+        debugPrint('markLost $id: $e');
+      }
+    }
+    return n;
+  }
+
+  /// What the Upload now button does: repair first, then send, then say what
+  /// happened. A button that silently does nothing is worse than an error.
+  Future<String> uploadNow() async {
+    final r = await rescanLocalClips();
+    if (r.error != null) return 'Could not check this phone: ${r.error}';
+    if (r.requeued > 0) {
+      _status = '${r.requeued} found, uploading';
+      notifyListeners();
+    }
+    await drainQueue();
+    final left = _pendingCount;
+    if (left == 0 && r.missing == 0) {
+      return r.filesOnDisk == 0
+          ? 'Nothing on this phone to upload.'
+          : 'Everything on this phone is already in Drive.';
+    }
+    if (left == 0 && r.missing > 0) {
+      return '${r.missing} clip(s) are listed as waiting but their files are '
+          'not on this phone. Tap Rescan for what to do.';
+    }
+    return '$left clip(s) left — keep this screen open.';
+  }
+
   /// Uploads everything queued, oldest first. Safe to call repeatedly — it
   /// returns immediately if a drain is already running.
   Future<void> drainQueue() async {
@@ -532,6 +887,9 @@ class SyncService extends ChangeNotifier {
 
     _uploading = true;
     _status = 'uploading';
+    // A session can have been finished since the last drain, which changes
+    // where its clips belong.
+    _completeCache.clear();
     notifyListeners();
 
     try {
@@ -547,10 +905,12 @@ class SyncService extends ChangeNotifier {
           continue;
         }
 
+        final speakerId = item['speakerId'] as String;
         final id = await drive.upload(
           file: file,
           fileName: item['fileName'] as String,
-          speakerId: item['speakerId'] as String,
+          speakerId: speakerId,
+          speakerComplete: await _speakerIsComplete(speakerId),
         );
 
         if (id == null) {
@@ -561,6 +921,9 @@ class SyncService extends ChangeNotifier {
         unawaited(clips.doc(item['docId'] as String).set({
           'uploaded': true,
           'driveFileId': id,
+          // Where it actually landed, so the dashboard can tell what is
+          // still waiting in the holding folder without listing Drive.
+          'inCorpus': _completeCache[speakerId] ?? false,
           'uploadedUtc': DateTime.now().toUtc().toIso8601String(),
         }, SetOptions(merge: true)).catchError((Object _) {}));
 
@@ -575,6 +938,31 @@ class SyncService extends ChangeNotifier {
       unawaited(_touchDevice());
       notifyListeners();
     }
+  }
+
+  /// Is this session finished? Decides whether a clip uploads straight into
+  /// P01..P20 or waits in the holding folder.
+  ///
+  /// Cached for the length of one drain: a speaker does not finish halfway
+  /// through their own upload queue, and asking Firestore once per clip for
+  /// the same answer would be twenty reads for one session.
+  final Map<String, bool> _completeCache = {};
+
+  Future<bool> _speakerIsComplete(String speakerId) async {
+    final cached = _completeCache[speakerId];
+    if (cached != null) return cached;
+    var complete = false;
+    try {
+      final doc = await speakers.doc(speakerId).get();
+      complete = (doc.data()?['status'] as String?) == 'complete';
+    } catch (e) {
+      // Offline, or the row has not synced yet. The holding folder is the
+      // safe answer: a clip that waits there is found and moved later, a
+      // clip written into P01..P20 too early is not.
+      debugPrint('speaker status lookup failed: $e');
+    }
+    _completeCache[speakerId] = complete;
+    return complete;
   }
 
   /// Local files are kept until confirmed in Drive. This clears the ones that

@@ -1,4 +1,4 @@
-ANTARVANI setup  2026-11-17 13:51:38.633181
+ANTARVANI setup  2026-11-19 16:48:14.919584
 Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 1. Project folder ===========================================
@@ -15,6 +15,7 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 === 4. Firebase config files ====================================
   [OK]    .firebaserc -> antarvaani-the-voice
   [OK]    firebase.json has the firestore section
+  [OK]    firebase.json has the hosting section
   [OK]    firestore.rules is the ANTARVANI version
   [OK]    firestore.indexes.json
 
@@ -32,6 +33,7 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
           applicationId: com.silentvoice.silent_voice_recorder
   [OK]    lib/firebase_options.dart and google-services.json match antarvaani-the-voice
   [OK]    google-services Gradle plugin applied
+  [OK]    website Firebase config matches the app
 
 === 9. SHA-1 fingerprint (Google sign-in fails silently without it) ===
           this laptop's debug SHA-1: 28:19:F3:76:45:4E:6D:CD:96:4A:A7:2B:C5:FE:BB:33:7E:64:EC:8F
@@ -56,6 +58,8 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 12. Android manifest and Gradle =============================
   [OK]    AndroidManifest already correct
+  [OK]    FrameExtractor.kt is up to date
+  [OK]    MainActivity.kt is up to date
   [OK]    proguard-rules.pro keeps TensorFlow Lite
   [OK]    gradle.properties sets kotlin.jvm.target.validation.mode
   [OK]    minSdk = 26

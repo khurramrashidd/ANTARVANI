@@ -11,6 +11,7 @@ import '../../services/lip_reader.dart';
 import '../../services/model_service.dart';
 import '../../services/personal_store.dart';
 import '../../services/speech_service.dart';
+import '../../widgets/crop_strip.dart';
 import '../../widgets/lip_camera.dart';
 
 /// Silent speech: the camera watches the lips, the model names the phrase,
@@ -37,6 +38,14 @@ class _SpeakScreenState extends State<SpeakScreen> {
   Float32List? _probs;
   int? _spoken; // label index that was said aloud
   int _personalN = 0;
+
+  /// The frames from the last attempt, kept so "Read it anyway" does not make
+  /// the person mouth the phrase a second time.
+  (List<RawFrame>, int)? _lastShot;
+  bool _guessed = false;
+
+  /// The mouth frames from the last attempt, shown under the result.
+  Uint8List? _lastCrops;
 
   @override
   void initState() {
@@ -91,6 +100,7 @@ class _SpeakScreenState extends State<SpeakScreen> {
       _ranked = const [];
       _probs = null;
       _spoken = null;
+      _lastCrops = null;
     });
     await SpeechService.instance.stop();
     final shot = await cam.capture(card);
@@ -99,11 +109,25 @@ class _SpeakScreenState extends State<SpeakScreen> {
       setState(() => _message = tr('speak_camera_error'));
       return;
     }
-    setState(() => _working = true);
+    _lastShot = shot;
+    await _process(card, fallback: false);
+  }
+
+  /// Turns the frames already captured into a prediction. Separate from the
+  /// capture so the same frames can be read again with [fallback] on.
+  Future<void> _process(ModelCard card, {required bool fallback}) async {
+    final shot = _lastShot;
+    if (shot == null) return;
+    setState(() {
+      _working = true;
+      _guessed = fallback;
+      if (fallback) _message = null;
+    });
     try {
       final problem = await LipReader.instance.ensureLoaded();
       if (problem != null) throw StateError(problem);
-      final (crops, why) = await LipReader.instance.crop(shot.$1, shot.$2, card);
+      final (crops, why) = await LipReader.instance
+          .crop(shot.$1, shot.$2, card, fallback: fallback);
       if (crops == null) {
         if (mounted) {
           setState(() => _message =
@@ -111,6 +135,7 @@ class _SpeakScreenState extends State<SpeakScreen> {
         }
         return;
       }
+      if (mounted) setState(() => _lastCrops = crops);
       // One frame for the "reading" state to paint before the model runs.
       await Future<void>.delayed(const Duration(milliseconds: 30));
       final raw = LipReader.instance.run(crops);
@@ -206,8 +231,29 @@ class _SpeakScreenState extends State<SpeakScreen> {
         const SizedBox(height: 12),
         if (_refreshing)
           _Note(icon: Icons.sync, text: tr('speak_updating_personal')),
-        if (_message != null)
+        if (_message != null) ...[
           _Note(icon: Icons.info_outline, text: _message!, warn: true),
+          // The detector can fail on a phone where the face is perfectly
+          // visible. Rather than stop there, the same frames can be read
+          // with the mouth assumed to be in the usual place.
+          if (_lastShot != null && _message == tr('speak_no_face'))
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _working
+                    ? null
+                    : () => _process(card, fallback: true),
+                icon: const Icon(Icons.auto_fix_high),
+                label: Text(tr('speak_try_anyway')),
+              ),
+            ),
+        ],
+        if (_guessed && _ranked.isNotEmpty)
+          _Note(icon: Icons.help_outline, text: tr('speak_guessed'), warn: true),
+        if (_lastCrops != null && !_working) ...[
+          CropStrip(crops: _lastCrops!, card: card),
+          const SizedBox(height: 12),
+        ],
         if (_working)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 12),

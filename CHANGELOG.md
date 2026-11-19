@@ -4,6 +4,425 @@ Zip files are numbered: `ANTARVANI_app_v01.zip`, `v02`, `v03` … Always use the
 highest number. (This is the delivery number, not the app's `version:` in
 pubspec.yaml, which stays 1.0.0+1 until you decide to change it.)
 
+## v41 — 19 Nov 2026
+
+**The website opens in light mode, with a dark toggle.** Light is the
+default: it is what a projector, a printed handout and a corridor all
+favour, and the figures are white-background documents that sit flat on a
+light page rather than glowing on a dark one. The moon button in the nav
+switches to dark, and the choice is remembered per browser across both
+pages. The theme is applied by an inline script before the first paint, so
+a remembered dark never flashes light on the way in.
+
+Every colour that differs now lives in one of two token blocks in
+`site.css` and nowhere else, so a new component gets both themes by using
+the token.
+
+Two layout bugs surfaced while checking it, both already live in v40:
+
+* The nav links were pushing the page to 960 px wide on a phone instead of
+  scrolling inside their own row. A flex item will not shrink below its
+  content without `min-width: 0`, and `body { overflow-x: hidden }` had
+  been hiding the damage rather than fixing it.
+* The toggle's screen-reader label is `position: absolute` with no
+  positioned ancestor, so it anchored to the document rather than the
+  button and stretched the page from inside the scrolling nav.
+
+Both pages now measure exactly the viewport width at 390 px and 1440 px.
+
+**The figures notebook was never finding `results.json`.** Training writes
+each run to `models/hi/v1`, `v2`, `v3`… and the notebook looked in
+`models/hi` itself, so every result figure would have been skipped and the
+site would have said "training is the next stage" even after a finished run.
+It now takes the newest run, by version number rather than by name, so v10
+sorts after v9.
+
+**One zip with everything, as the last cell.** `ANTARVANI_results_hi.zip`:
+
+* `results/` — results.json, the model card, `trained_speakers.json` saying
+  which speakers the model saw, and the running `speakers_history.json`
+* `figures/` — every figure, PNG for slides and PDF for the paper
+* `web/` — what the website reads
+* `corpus/` — corpus_summary.json, manifest.csv, environment.txt
+
+About 8 MB. The `.tflite` is left out: it is most of the weight and nothing
+a report needs. Speakers appear as numbers only, so no volunteer's name is
+in the archive. If there is no training run the README says so instead of
+quietly shipping an empty folder.
+
+## v40 — 18 Nov 2026
+
+**A website.** `web/public` — two pages, deployed to Firebase Hosting in the
+same project as the app, no framework and no build step.
+
+**The project page** (`index.html`, public) tells the whole story on one
+scroll: the problem, all twenty phrases in Devanagari with transliteration
+and English, the six-step pipeline, the corpus figures, the network, few-shot
+personalisation, the results, the ethics rules, and the team. Dark, with the
+figures sitting on it like paper on a desk. Checked at 390 px and 1440 px —
+no horizontal scroll at either, and the content is visible even if the
+scripts never run.
+
+Every number on it comes from `data/figures.json`, which the figures notebook
+writes. There is nowhere to type one in by hand. If training has not happened
+the page says the evaluation is the next stage; if the run came out at chance
+the page says that too, in a red panel above the numbers, before anyone has
+to ask.
+
+**The team dashboard** (`dashboard.html`) is the live corpus on the web:
+speakers counting, usable clips, sessions complete, clips still to upload,
+the speaker x phrase coverage grid, clips by collector, and the full speaker
+table. It reads the same Firestore the phones write, so it cannot disagree
+with the app. Google sign-in, and the same rule as the app — `users/{email}`
+must say member, admin or master, with the master recognised by address so
+the project cannot lock out its own owner. **Volunteer names appear only
+here, after signing in; the public page shows speaker numbers and nothing
+else.**
+
+**Section 8 of the figures notebook** builds what the site reads: the figures
+it uses, the corpus counts, the headline numbers, and a filmstrip of mouth
+crops for the hero — the last only for the speaker named in `FACE_SPEAKER`,
+since that one goes on a public page. It downloads as a zip to unzip into
+`web/public/data/`.
+
+`setup` now registers the Firebase **web** app alongside Android and writes
+`web/public/assets/firebase-config.js` from `lib/firebase_options.dart`, so
+the site and the app can never end up pointing at different projects, and
+adds the `hosting` block to `firebase.json`. Nothing to fill in by hand.
+
+Deploy: `setup`, then `firebase deploy --only hosting`.
+
+## v39 — 18 Nov 2026
+
+**A figures notebook.** `pipeline/ANTARVANI_figures.ipynb` — open it in Colab,
+Run all, and it writes fifteen figures to `<WORK_DIR>/figures` as PNG for
+slides and PDF for the paper, then zips them for download. No GPU needed.
+
+Two sets, available at different times. The corpus and system figures need
+only the clips in Drive, so they are ready now:
+
+* the corpus: speakers, clips, clips per phrase, clips per speaker, session
+  completeness, all on one slide
+* a speaker x phrase grid showing exactly where the holes are
+* the collection timeline
+* the alignment step drawn on a real frame: eye corners, the rotated box
+  they define, and the 88x88 the model is handed
+* one whole utterance as its 48 crops
+* the same phrase across several speakers
+* mouth movement over the three-second window, phrase by phrase
+* camera-to-phrase as a six-box strip, and the network as a funnel of boxes
+  each as wide as its tensor
+
+The result figures read `results.json` exactly as training wrote it:
+confusion, accuracy per phrase, accuracy per held-out speaker, fold spread,
+the few-shot personalisation curve, and a headline slide. If there is no run
+yet they say so. If the run is at chance they say that too, and point at the
+crop figures as the place to look.
+
+One house style across all of them: one palette, type large enough for a
+projector, white background, 200 dpi.
+
+Faces are a privacy matter. Mouth crops are the model's real input and are
+close to unidentifiable, so they are used freely; a whole face is drawn only
+for the speaker named in `FACE_SPEAKER`, which is for a member of the team,
+never a volunteer.
+
+`pipeline/build_figures_notebook.py` regenerates the notebook from
+`antarvani_pipeline.py` and `antarvani_figures.py`, so the copy inside it can
+never drift from the modules in this repository.
+
+## v38 — 18 Nov 2026
+
+**"14 rejected" was never about the session.** That grey tag counted every
+take of a speaker that isn't usable, and it put *thrown out* and *lost* under
+one word — so a session that had only been reinstalled over looked as though
+somebody had judged it. It reads **"14 lost"** and **"7 thrown out"** now, and
+on a finished session it is gone altogether: 20/20 is green and clean, with
+the full history on the session's own screen.
+
+A **rejected session** is unmistakable instead: a red **NOT COUNTED** chip and
+the card visibly faded. Nothing else wears grey.
+
+**Unfinished sessions have their own folder in Drive.** Anything short of its
+target now uploads to `_in_progress/S011/`, one folder per speaker, and moves
+into `P01..P20` when the session is finished. The pipeline reads the phrase
+folders and ignores everything else, so a half-recorded volunteer can no
+longer reach a model by accident — and the number of files in one folder is
+that volunteer's progress at a glance.
+
+**Clips in the wrong folder** — a new card on Overview for everything
+recorded before that folder existed. **Try one** moves a single clip and tells
+you what Drive said; **Move what I can** does the rest. Drive only lets the
+account that uploaded a clip move it, so the card names the collector who has
+to run it on their own phone for the ones it can't touch. Each collector sees
+the same card.
+
+**Rejecting now actually keeps a session out of training.** It did not before:
+the notebook walks the Drive folders and never read the speaker status, so a
+rejected session's files were still sitting in `P01..P20`. Two things changed:
+
+* The app writes `_skip_speakers.txt` at the top of the corpus folder and the
+  notebook drops every ID in it. This takes effect the moment you reject —
+  no file has to move, and nothing depends on who owns what.
+* The videos move to `_rejected` as well, and come back when you put the
+  session back. A finished session returns to `P01..P20`; one still short
+  returns to `_in_progress`.
+
+Deleting a speaker rewrites the skip list too — the number goes back into the
+pool, and a leftover line would have quietly excluded the next volunteer to
+get it.
+
+The manifest CSV shows each clip's real folder, and the notebook prints how
+many are parked in `_in_progress` and therefore not trained on.
+
+## v37 — 18 Nov 2026
+
+**Every Drive call now renews an expired sign-in and tries again.** This is
+the "Not deleted — Could not delete in Drive: Access was denied …
+invalid_token" you hit on S012. Google's token lasts about an hour; v32 taught
+uploading to renew it, but delete, rename, share, scan, reject and
+`phrases.json` were all still using whatever token the app picked up at
+sign-in. After an hour on the dashboard, every one of them failed with a
+message that read like a permissions problem and was not. All seven renew and
+retry once now.
+
+**Master admin can reject a whole session, and put it back.** Two different
+things were being conflated: a session that is no good, and a number that
+should go back into the pool.
+
+* **Reject** (Speakers → open one → "Reject this session") takes it out of
+  every total — speaker count, clip count, phrase breakdown, collector
+  figures, and the manifest that training reads. Nothing is deleted. The row,
+  the clips and the number all stay, with your reason on the record.
+* **Put it back** appears in the same place once a session is rejected. When
+  the volunteer re-records, one tap returns it to the corpus; if it is still
+  short of its target it comes back as unfinished rather than quietly
+  counting as done.
+* **The bin at the top of the screen** is unchanged and still the only thing
+  that frees the number: it destroys the clips first, so nothing is orphaned.
+
+**The speaker count is honest again.** It was counting sessions whose every
+clip is lost — speakers on paper, no data at all. The Overview headline now
+counts active sessions only, and a card lists the ones holding nothing usable
+so you can reject them all in one tap. Rejected sessions sit behind their own
+chip in Speakers, with the reason and who rejected them on the session screen.
+
+A `speakerStatus` column was added to the manifest CSV, so a rejected session
+cannot walk back into training through the export.
+
+Also fixed: "free up unused numbers" used to offer sessions whose clips were
+all lost, which would have deleted the speaker row and left the clip records
+behind. It now offers only numbers that hold no clip record at all.
+
+## v36 — 17 Nov 2026
+
+**Speak now records a video and reads the mouth out of the file**, instead of
+grabbing frames from the live preview. That is how the training clips were
+made, so recognition finally sees the same thing the model was trained on:
+same camera path, same resolution, same encoder.
+
+Flutter cannot decode frames from an .mp4 by itself and the ffmpeg packages
+that used to do it are retired, so the frames come from Android's own
+`MediaMetadataRetriever` behind a method channel. `setup` writes both Kotlin
+files (`FrameExtractor.kt`, `MainActivity.kt`) into `android/app`; any
+existing MainActivity is kept as `.antarvani.bak`.
+
+Only the luminance is carried across — the colour half is filled with the
+neutral value — because the detector and the model both work in grey. That is
+a third less data per frame and one pass over the pixels.
+
+**The old path is still there as a fallback.** On a phone where the native
+side is missing or the video cannot be decoded, Speak drops back to live
+preview frames and works as it did before. It is probed once when the camera
+opens, so a phone without it never counts down twice.
+
+The video is deleted the moment its frames are read. Nothing is kept: this is
+recognition, not collection.
+
+**Personalise follows automatically**, since both screens capture through the
+same camera widget. That matters — samples recorded one way and recognised
+the other would not match.
+
+**"What the model saw".** Under the result, the actual mouth frames fed to
+the model, eight of them across the clip. A wrong answer has two very
+different causes — a weak model, or a crop that missed the mouth — and no
+accuracy figure tells them apart. This does, in a second.
+
+Version stays `1.0.0+3`.
+
+## v35 — 17 Nov 2026
+
+**The face check was never actually looking.** This is the bug behind "480 of
+500 clips flagged", every clip scoring `face 0%`, and Speak refusing a face
+that fills the screen.
+
+The camera controller asks for `ImageFormatGroup.nv21`, but the CameraX
+implementation — the default on Android now — ignores that and delivers
+YUV_420_888 in three planes. The code passed `planes.first.bytes`, the
+luminance plane alone, while telling ML Kit it was complete NV21: two thirds
+of the bytes the format promises. ML Kit threw on every frame, the error was
+swallowed as a dropped frame, and the score stayed at zero. Not "no face
+found" — never looked.
+
+Camera frames are now packed into real NV21 before being handed over, in
+`camera_image.dart`, handling both the one-plane and three-plane cases. The
+same fix covers the recording quality check and the Speak screen, since both
+went through the same mistake.
+
+The error is no longer swallowed either: a frame that cannot be checked is
+reported as a failure and the reason is kept, so this cannot hide again.
+
+**"Read it anyway".** If the detector still fails on a phone, Speak no longer
+dead-ends. The frames just captured are read again with the mouth assumed to
+be where it usually is, and the answer is labelled as the weaker guess it is.
+No re-recording: it reuses the frames already taken.
+
+Version stays `1.0.0+3`.
+
+## v34 — 17 Nov 2026
+
+Fixes the one error setup found in v33: `Team.email` is nullable, so the
+rescan could not call `.isEmpty` on it directly. Nothing else changed;
+version stays `1.0.0+3`.
+
+## v33 — 17 Nov 2026
+
+**"Upload now" could do nothing, silently.** The upload queue is a list in
+the phone's own settings; the clips are files on disk and rows in Firestore.
+Those three can drift apart, and when they do the dashboard says clips are
+waiting while the phone's queue is empty — so the button had nothing to do
+and said nothing about it.
+
+The commonest way to cause it: `flutter install`, which **uninstalls the old
+app before installing**. Uninstalling deletes the app's files and settings,
+so the videos and the queue go while the Firestore rows stay.
+
+- **Upload now repairs first.** It rescans the phone, rebuilds the queue from
+  the files that are really there, uploads, and then says what happened —
+  "12 left", "Nothing on this phone to upload", or the error. Same on the
+  home banner and the update screen.
+- **Rescan this phone** (Settings → Background upload) reports the three
+  counts side by side: files here, added to the queue, and rows whose file
+  has gone.
+- **Mark as lost.** For rows whose file no longer exists, an admin can mark
+  them lost. The row is kept with a reason and who did it; it stops being
+  counted as waiting. Overview shows a "clips lost" line so the number is
+  never quietly dropped.
+- Lost clips are counted separately from rejected ones, which previously
+  shared a bucket and would have read as "40 clips rejected".
+
+Version stays `1.0.0+3`.
+
+## Notebook update 2 — 17 Nov 2026 (no app change)
+
+Surviving a stop, and saying plainly which runtime to be on.
+
+- **A "what to do now" banner.** Says whether this runtime has a GPU, which
+  step each runtime is for, how many clips are already cropped and how many
+  folds already trained, and what switching the runtime would cost — nothing,
+  because the work folder holds it all. Ends with the single next action.
+- **Writes can no longer be left half-finished.** Colab stops a runtime
+  without warning, and a `.npz` being written at that moment is left
+  truncated: the file exists, so the old code counted it as done, then numpy
+  failed on it an hour later in the middle of training. Crops, folds and
+  JSON are now written to a temporary name and renamed into place, so a file
+  only ever appears complete.
+  (A trap worth recording: numpy appends `.npz` to any `savez` path that does
+  not already end in it, so the temporary name has to keep that suffix or the
+  rename looks for a file that was never written.)
+- **Damaged crops are repaired, not fatal.** Every cached crop is read before
+  training; any that cannot be decompressed are deleted and cropped again.
+  The clip set stays the same, so the saved folds still match.
+- **A damaged saved model retrains** instead of ending the run.
+- **The lock is released on any failure** — no GPU, a disconnect, Ctrl-C —
+  so a crashed account does not block the next one for forty minutes.
+- **A write test before training.** If Drive is not mounted, or this account
+  only has view access to the shared folder, it says so in one sentence
+  instead of failing an hour later.
+
+## Notebook update — 17 Nov 2026 (no app change)
+
+The training notebook now runs across several Google accounts, so a session
+that loses its free GPU can be carried on from the next account.
+
+- **Folders are found by name**, not by path, so the same notebook works from
+  any account whose Drive has a shortcut to `ANTARVANI` and
+  `ANTARVANI_train`. A **work id** is printed; if it differs between
+  accounts they are not sharing a folder, and that account would train from
+  scratch.
+- **Checkpoints inside a fold** through Keras `BackupAndRestore`, which
+  restores the weights, the Adam moments and the epoch counter together. That
+  matters: restoring only the weights — the obvious thing to write — would
+  resume with a reset optimiser and a learning-rate schedule in the wrong
+  place, and quietly train a worse model.
+- **A lock file** stops two accounts training the same thing at once.
+- **The GPU is checked** before training and before every fold. Colab hands
+  back a CPU runtime when the allowance runs out, and training would carry on
+  perhaps fifteen times slower; now it stops and says to switch accounts.
+- **A warning when settings differ.** Saved work is only reused when the
+  clips and the settings match, so a different `FOLDS` on another account
+  silently starts over. It now says so.
+- Cell 3 reports, before any work: both folder paths, the work id, how many
+  folds are already finished, who holds the lock, and which speakers are
+  complete.
+
+## v32 — 17 Nov 2026
+
+Fixes the one error `flutter analyze` found in v31. `clearAuthCache()` belongs
+to `GoogleSignInAccount`, not to `GoogleSignIn`, so the call is now made on
+the signed-in account. It also had to move below the sign-in check, since
+there is no account to clear the token from until that has run. Nothing else
+changed; version stays `1.0.0+3`.
+
+## v31 — 17 Nov 2026
+
+**Fixed the bug that was actually losing your uploads.**
+
+A Google access token lasts about an hour. The app signed in to Drive once at
+startup and kept that connection for the whole session, and nothing ever
+renewed it. After an hour every upload failed with
+
+    Access was denied ... error="invalid_token"
+
+and the clips stayed on the phone. That is the error on the Overview card,
+and it is very likely why 150 clips are not in Drive — not collectors
+forgetting.
+
+Drive calls now notice an expired token, renew the sign-in without showing
+anything, and run the call again. The file stream is opened inside the retry,
+so the second attempt reads the video from the beginning. If the renewal
+genuinely fails, the message says to open the app and reconnect Drive instead
+of printing the raw Google error.
+
+This also makes the background service work: it may run hours after the app
+was last opened, which is exactly when the old token would be dead.
+
+**The update screen can now upload.** A phone locked out by a forced update
+could not reach its own upload button, so finished clips were trapped until
+the person installed the new APK. The update screen now shows how many clips
+are still on the phone, with an Upload now button, and says plainly:
+installing over the old app keeps them — **uninstalling deletes every clip
+that has not reached Drive**.
+
+**The notebook trains only on complete speakers.** A half-recorded speaker is
+not neutral: their missing phrases drag down those classes while their
+present ones are over-weighted. `MIN_PHRASES` in the settings cell (default
+20, the whole set) decides who is in. Everyone else is listed with exactly
+which phrases are missing, so you know whose clips to chase. They join the
+next run by themselves once their uploads land. A ten-take speaker with 200
+clips counts as complete, so this still works when Tier B recording starts.
+
+**Each model records who trained it.** Every model folder now holds
+`trained_speakers.json` — the speaker IDs used, their clip counts, and who
+was left out and why. `models/<lang>/speakers_history.json` keeps the same
+for every version, so months from now it is still possible to say which
+speakers any given model saw. The figures also go into `paper_numbers.md`.
+
+Cell 2 of the notebook now prints READY TO TRAIN and WAITING ON UPLOADS
+before anything is cropped, so a bad run can be stopped in the first minute.
+
+**Version is now 1.0.0+3.**
+
 ## v30 — 17 Nov 2026
 
 **Uploads carry on after the app is closed.** A real Android foreground

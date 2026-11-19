@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +43,13 @@ class ClipView {
   final double qcFaceScore; // fraction of preview frames with a face
   final double qcMouthWidth; // mouth width as a fraction of frame width
 
+  /// In P01..P20, where training reads — as opposed to waiting in
+  /// _in_progress because the session is not finished.
+  ///
+  /// Clips uploaded before the holding folder existed have no flag and are
+  /// in the phrase folders, which is what `true` says.
+  final bool inCorpus;
+
   ClipView(Map<String, dynamic> m, this.docId)
       : speakerId = m['speakerId'] as String? ?? '',
         phraseId = m['phraseId'] as String? ?? '',
@@ -60,12 +69,34 @@ class ClipView {
         uploadedUtc = m['uploadedUtc'] as String? ?? '',
         deviceId = m['deviceId'] as String? ?? '',
         qcFaceScore = (m['qcFaceScore'] as num?)?.toDouble() ?? -1.0,
-        qcMouthWidth = (m['qcMouthWidth'] as num?)?.toDouble() ?? -1.0;
+        qcMouthWidth = (m['qcMouthWidth'] as num?)?.toDouble() ?? -1.0,
+        inCorpus = m['inCorpus'] as bool? ?? true;
 
   bool get live => status == 'ok';
 
-  /// Where it sits in Drive: "P03/S014_P03_t01.mp4".
-  String get drivePath => DriveUploader.pathOf(phraseId, fileName);
+  /// Recorded, then its file disappeared from the phone — almost always a
+  /// reinstall. Kept as a record, counted nowhere.
+  bool get lost => status == 'lost';
+
+  /// Thrown out by a person, as opposed to lost by a reinstall. Two very
+  /// different things that used to share one word on screen.
+  bool get thrownOut => status == 'rejected';
+
+  /// Where it sits in Drive: "P03/S014_P03_t01.mp4", or the holding folder
+  /// while the session is unfinished.
+  String get drivePath => inCorpus
+      ? DriveUploader.pathOf(phraseId, fileName)
+      : '${DriveUploader.inProgressFolderName}/$speakerId/$fileName';
+
+  /// Enough to move the file and fix its record afterwards.
+  MoveRef? get moveRef => driveFileId == null
+      ? null
+      : MoveRef(
+          docId: docId,
+          driveFileId: driveFileId!,
+          phraseId: phraseId,
+          ownerEmail: collectorEmail,
+        );
 
   /// When it was recorded, in the reader's own time zone.
   DateTime? get capturedAt => DateTime.tryParse(capturedUtc)?.toLocal();
@@ -113,6 +144,12 @@ class SpeakerView {
   /// The volunteer opened the app and asked for their clips to be removed.
   bool get deletionRequested => raw['deletionRequested'] == true;
 
+  /// Master has taken this session out of the corpus. The row and the number
+  /// are kept, so it can be put back once the volunteer re-records.
+  bool get rejected => status == 'rejected';
+  String get rejectedReason => (raw['rejectedReason'] as String?) ?? '';
+  String get rejectedBy => (raw['rejectedBy'] as String?) ?? '';
+
   /// Takes expected per phrase for this speaker.
   int get expectedTakes => tier == 'B' ? Tier.b.takes : Tier.a.takes;
   int get targetClips => expectedTakes * kPhrases.length;
@@ -141,8 +178,22 @@ class Stats {
   final List<SpeakerView> speakers;
   Stats(this.clips, this.speakers);
 
-  late final List<ClipView> live = clips.where((c) => c.live).toList();
-  late final List<ClipView> rejected = clips.where((c) => !c.live).toList();
+  /// The numbers master has rejected. Their clips are left alone on Drive,
+  /// but nothing they hold counts: not the clip total, not the phrase
+  /// breakdown, not the collector figures. That is what rejecting is for — a
+  /// session that stayed in the totals would be no different from one that
+  /// was never rejected at all.
+  late final Set<String> rejectedSpeakerIds = {
+    for (final s in speakers)
+      if (s.rejected) s.id,
+  };
+
+  late final List<ClipView> live = clips
+      .where((c) => c.live && !rejectedSpeakerIds.contains(c.speakerId))
+      .toList();
+  late final List<ClipView> rejected =
+      clips.where((c) => c.status == 'rejected').toList();
+  late final List<ClipView> lost = clips.where((c) => c.lost).toList();
 
   late final Map<String, int> perPhrase = {
     for (final p in kPhrases)
@@ -160,9 +211,60 @@ class Stats {
   List<ClipView> liveOf(String speakerId) =>
       (bySpeaker[speakerId] ?? const []).where((c) => c.live).toList();
 
-  /// Speakers that hold no clips at all — their numbers are dead weight.
-  late final List<SpeakerView> empty =
-      speakers.where((s) => liveOf(s.id).isEmpty).toList();
+  /// The speakers that count. A rejected session is kept so master can put it
+  /// back, but it is not part of any total — which is the whole point of
+  /// rejecting it.
+  late final List<SpeakerView> active =
+      speakers.where((s) => !s.rejected).toList();
+
+  late final List<SpeakerView> rejectedSpeakers =
+      speakers.where((s) => s.rejected).toList();
+
+  /// Numbers handed out and never used: not one clip row. Safe to hand back,
+  /// because there is nothing to orphan.
+  late final List<SpeakerView> empty = active
+      .where((s) => (bySpeaker[s.id] ?? const []).isEmpty)
+      .toList();
+
+  /// Recorded, but nothing survives: every clip is lost or rejected. These
+  /// were the ones inflating the speaker count — they look like speakers and
+  /// contribute no data. Handing their number back needs the full delete, so
+  /// the clip rows go first.
+  late final List<SpeakerView> nothingUsable = active
+      .where((s) =>
+          (bySpeaker[s.id] ?? const []).isNotEmpty && liveOf(s.id).isEmpty)
+      .toList();
+
+  /// Clips of a finished session still sitting in the holding folder. They
+  /// are uploaded and safe, but training will not see them until they are
+  /// moved into P01..P20.
+  List<ClipView> holdingOf(String speakerId) => (bySpeaker[speakerId] ??
+          const [])
+      .where((c) => c.live && c.uploaded && !c.inCorpus)
+      .toList();
+
+  /// Clips of an unfinished session that are in P01..P20, where a
+  /// half-recorded speaker does not belong.
+  List<ClipView> strayOf(String speakerId) =>
+      (bySpeaker[speakerId] ?? const [])
+          .where((c) => c.live && c.uploaded && c.inCorpus)
+          .toList();
+
+  bool finished(SpeakerView s) => liveOf(s.id).length >= s.targetClips;
+
+  /// Finished sessions whose clips have not been moved into the corpus yet.
+  late final List<SpeakerView> waitingToMoveIn = active
+      .where((s) => finished(s) && holdingOf(s.id).isNotEmpty)
+      .toList();
+
+  /// Unfinished sessions whose clips are still mixed in with the corpus —
+  /// everything recorded before the holding folder existed.
+  late final List<SpeakerView> waitingToMoveOut = active
+      .where((s) => !finished(s) && strayOf(s.id).isNotEmpty)
+      .toList();
+
+  int get strayClips =>
+      waitingToMoveOut.fold(0, (n, s) => n + strayOf(s.id).length);
 
   int get total => live.length;
   int get uploaded => live.where((c) => c.uploaded).length;
@@ -181,10 +283,10 @@ class Stats {
 
   /// Volunteers who have asked for their clips to be deleted.
   late final List<SpeakerView> deletionRequests =
-      speakers.where((s) => s.deletionRequested).toList();
+      active.where((s) => s.deletionRequested).toList();
 
   /// Speakers that still owe clips, by their own tier.
-  late final List<SpeakerView> incomplete = speakers
+  late final List<SpeakerView> incomplete = active
       .where((s) => liveOf(s.id).isNotEmpty && liveOf(s.id).length < s.targetClips)
       .toList();
 }
@@ -281,7 +383,7 @@ class _OverviewTab extends StatelessWidget {
           children: [
             _Stat(
                 label: 'Speakers',
-                value: '${stats.speakers.length}',
+                value: '${stats.active.length}',
                 icon: Icons.person_outline),
             const SizedBox(width: 10),
             _Stat(
@@ -295,6 +397,21 @@ class _OverviewTab extends StatelessWidget {
                 icon: Icons.format_list_numbered),
           ],
         ),
+        if (stats.rejectedSpeakers.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _Banner(
+            icon: Icons.block,
+            color: Colors.grey,
+            text: '${stats.rejectedSpeakers.length} '
+                '${stats.rejectedSpeakers.length == 1 ? "session is" : "sessions are"} '
+                'rejected and left out of every total above: '
+                '${stats.rejectedSpeakers.take(6).map((s) => s.id).join(", ")}'
+                '${stats.rejectedSpeakers.length > 6 ? "…" : ""}. '
+                'Their numbers are still held for them — open one in Speakers '
+                'to put it back once the volunteer has re-recorded, or to '
+                'delete it and hand the number over.',
+          ),
+        ],
         if (stats.deletionRequests.isNotEmpty) ...[
           const SizedBox(height: 12),
           _Banner(
@@ -320,6 +437,10 @@ class _OverviewTab extends StatelessWidget {
           ),
         ],
         if (stats.empty.isNotEmpty) _ReclaimCard(stats: stats),
+        if (Team.isMaster && stats.nothingUsable.isNotEmpty)
+          _NothingUsableCard(stats: stats),
+        if (stats.waitingToMoveOut.isNotEmpty || stats.waitingToMoveIn.isNotEmpty)
+          _DriveTidyCard(stats: stats),
         _DeleteByNumberCard(stats: stats),
         const _StrandedFilesCard(),
         if (me?.isMaster ?? false) const _PublishUpdateCard(),
@@ -692,6 +813,314 @@ class _ReclaimCardState extends State<_ReclaimCard> {
   }
 }
 
+/// Puts every clip in the folder it belongs in.
+///
+/// The corpus folder holds `P01..P20`, which is all the training pipeline
+/// reads, and `_in_progress/<speaker>`, which it ignores. A session that is
+/// still short of its target belongs in the holding folder; one that is
+/// finished belongs in the phrase folders. New clips are uploaded straight
+/// to the right place, so this card exists for the ones recorded before the
+/// holding folder did, and for sessions that have been finished since.
+///
+/// Anyone can run it, and that is deliberate: Drive lets an account move the
+/// files it uploaded and refuses every other account, so some of this work
+/// can only be done from the collector's own phone. The card says whose.
+class _DriveTidyCard extends StatefulWidget {
+  final Stats stats;
+  const _DriveTidyCard({required this.stats});
+
+  @override
+  State<_DriveTidyCard> createState() => _DriveTidyCardState();
+}
+
+class _DriveTidyCardState extends State<_DriveTidyCard> {
+  bool _busy = false;
+
+  /// Every pending move, as (speaker, where it should go, which clips).
+  List<(SpeakerView, CorpusZone, List<MoveRef>)> get _jobs {
+    final st = widget.stats;
+    List<MoveRef> refs(List<ClipView> cs) =>
+        cs.map((c) => c.moveRef).whereType<MoveRef>().toList();
+    return [
+      for (final sp in st.waitingToMoveOut)
+        (sp, CorpusZone.holding, refs(st.strayOf(sp.id))),
+      for (final sp in st.waitingToMoveIn)
+        (sp, CorpusZone.corpus, refs(st.holdingOf(sp.id))),
+    ];
+  }
+
+  Future<void> _say(String title, String body) => showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: SingleChildScrollView(child: Text(body)),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+
+  /// One file, so it is clear whether Drive will allow this at all before
+  /// several hundred of them are attempted.
+  Future<void> _tryOne() async {
+    final jobs = _jobs;
+    if (jobs.isEmpty) return;
+    final (speaker, zone, refs) = jobs.first;
+    if (refs.isEmpty) return;
+    setState(() => _busy = true);
+    unawaited(_working(context, 'Moving one clip…'));
+    final report = await SyncService.instance.moveSpeakerClips(
+      speakerId: speaker.id,
+      zone: zone,
+      clips: [refs.first],
+    );
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    setState(() => _busy = false);
+    final where = zone == CorpusZone.corpus
+        ? 'into its phrase folder'
+        : 'into ${DriveUploader.inProgressFolderName}/${speaker.id}';
+    await _say(
+      report.moved > 0 ? 'That worked' : 'That did not move',
+      report.moved > 0
+          ? 'One clip of ${speaker.id} moved $where.\n\n'
+              'Open Drive and look if you like. If it is where you expect, '
+              'use "Move what I can" for the rest.'
+          : '${report.summary}\n\n'
+              'Nothing else was touched. If Drive says the file belongs to '
+              'another account, that collector has to open the app on their '
+              'own phone and run this card there.',
+    );
+  }
+
+  Future<void> _moveAll() async {
+    final jobs = _jobs;
+    if (jobs.isEmpty) return;
+    setState(() => _busy = true);
+    var moved = 0, blockedCount = 0, failed = 0, gone = 0;
+    final owners = <String>{};
+    String? stopped;
+
+    for (var i = 0; i < jobs.length; i++) {
+      final (speaker, zone, refs) = jobs[i];
+      if (refs.isEmpty) continue;
+      if (!mounted) return;
+      final report = await SyncService.instance.moveSpeakerClips(
+        speakerId: speaker.id,
+        zone: zone,
+        clips: refs,
+      );
+      if (report.error != null) {
+        stopped = report.error;
+        break;
+      }
+      moved += report.moved;
+      blockedCount += report.notAllowed;
+      failed += report.failed;
+      gone += report.notFound;
+      owners.addAll(report.blockedOwners);
+    }
+
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _say(
+      'Drive tidy-up',
+      stopped ??
+          [
+            '$moved clips moved into the right folder.',
+            if (blockedCount > 0)
+              '\n$blockedCount could not be moved from this phone. Drive only '
+                  'lets the account that uploaded a clip move it, so '
+                  '${owners.isEmpty ? "the collector who recorded them" : owners.join(", ")} '
+                  'has to open the app and run this same card.',
+            if (gone > 0) '\n$gone are no longer in Drive.',
+            if (failed > 0) '\n$failed failed — try again in a moment.',
+          ].join(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = widget.stats;
+    final out = st.strayClips;
+    final into =
+        st.waitingToMoveIn.fold(0, (n, sp) => n + st.holdingOf(sp.id).length);
+    final lines = <String>[
+      if (out > 0)
+        '$out from ${st.waitingToMoveOut.length} unfinished '
+            '${st.waitingToMoveOut.length == 1 ? "session is" : "sessions are"} '
+            'mixed into the phrase folders',
+      if (into > 0)
+        '$into from ${st.waitingToMoveIn.length} finished '
+            '${st.waitingToMoveIn.length == 1 ? "session is" : "sessions are"} '
+            'still waiting in ${DriveUploader.inProgressFolderName}',
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Card(
+        color: Theme.of(context).colorScheme.secondaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.drive_file_move_outline),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text('Clips in the wrong folder',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${lines.join(", and ")}.\n\n'
+                'Training reads P01..P20 only. Unfinished sessions wait in '
+                '${DriveUploader.inProgressFolderName} so a half-recorded '
+                'volunteer can never end up in a model by accident.',
+                style: const TextStyle(height: 1.35),
+              ),
+              const SizedBox(height: 10),
+              if (_busy)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6),
+                  child: LinearProgressIndicator(),
+                )
+              else
+                Row(
+                  children: [
+                    OutlinedButton(
+                        onPressed: _tryOne, child: const Text('Try one')),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                        onPressed: _moveAll,
+                        child: const Text('Move what I can')),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Master admin only: the sessions that recorded something and kept nothing.
+///
+/// Every clip of theirs is lost or thrown away, so they add a speaker to the
+/// count and no data to the corpus. Rejecting them in one go makes the totals
+/// honest without destroying anything: the rows and the numbers stay, and
+/// master can put any of them back from the speaker's own screen.
+class _NothingUsableCard extends StatefulWidget {
+  final Stats stats;
+  const _NothingUsableCard({required this.stats});
+
+  @override
+  State<_NothingUsableCard> createState() => _NothingUsableCardState();
+}
+
+class _NothingUsableCardState extends State<_NothingUsableCard> {
+  bool _busy = false;
+
+  Future<void> _rejectAll() async {
+    final rows = widget.stats.nothingUsable;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Leave ${rows.length} sessions out of the count?'),
+        content: SingleChildScrollView(
+          child: Text(
+            '${rows.map((s) => s.id).join(", ")}\n\n'
+            'Each of these recorded clips that are all lost or rejected, so '
+            'they count as speakers while holding no usable data.\n\n'
+            'Marking them rejected takes them out of every total, the '
+            'Speakers list and the manifest. Nothing is deleted: the rows and '
+            'the numbers stay, and you can put any of them back from its own '
+            'screen when the volunteer re-records.\n\n'
+            'To hand a number to a new volunteer instead, open that session '
+            'in Speakers and use the bin — that one is final.',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Leave them in')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Reject them')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _busy = true);
+    var done = 0;
+    String? failed;
+    for (final r in rows) {
+      try {
+        await SyncService.instance
+            .rejectSpeaker(r.id, 'No usable clips — all lost or rejected');
+        done++;
+      } catch (e) {
+        failed ??= '$e';
+      }
+    }
+    // One write covers the whole batch: the list is built from whatever is
+    // rejected now, not from what this loop happened to touch.
+    if (done > 0) await SyncService.instance.publishSkipList();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(failed == null
+          ? '$done sessions rejected — the totals above now count only '
+              'speakers with clips'
+          : '$done of ${rows.length} rejected; the rest failed: $failed'),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = widget.stats.nothingUsable;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Card(
+        color: Theme.of(context).colorScheme.tertiaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              const Icon(Icons.person_off_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${rows.length} ${rows.length == 1 ? "session holds" : "sessions hold"} '
+                  'no usable clips '
+                  '(${rows.take(5).map((s) => s.id).join(", ")}'
+                  '${rows.length > 5 ? "…" : ""}) but still count as speakers',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              _busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : TextButton(
+                      onPressed: _rejectAll, child: const Text('Reject')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Master admin only: point everyone at a new APK. Every phone on an older
 /// build is locked out until it installs this one, so the team never compares
 /// results collected by two different versions of the recorder.
@@ -1020,7 +1449,14 @@ class _ManifestButtonState extends State<_ManifestButton> {
       'drivePath', 'fileName', 'speakerId', 'phraseId', 'label', 'take',
       'status', 'qcVerdict', 'qcOverride', 'source', 'uploaded', 'fileBytes',
       'day', 'collector', 'driveFileId', 'driveLink', 'rejectedReason',
+      // A clip can be perfectly good and still belong to a session master has
+      // thrown out. Training filters on this column, so a rejected session
+      // cannot walk back in through the manifest.
+      'speakerStatus',
     ];
+    final speakerStatus = {
+      for (final sp in widget.stats.speakers) sp.id: sp.status,
+    };
     final rows = widget.stats.clips.toList()
       ..sort((a, b) {
         final p = a.phraseId.compareTo(b.phraseId);
@@ -1048,6 +1484,7 @@ class _ManifestButtonState extends State<_ManifestButton> {
         c.driveFileId ?? '',
         c.driveFileId == null ? '' : DriveUploader.webLink(c.driveFileId!),
         c.rejectedReason ?? '',
+        speakerStatus[c.speakerId] ?? 'complete',
       ].map(csvCell).join(','));
       out.write('\n');
     }
@@ -1312,6 +1749,17 @@ class _HealthCardState extends State<_HealthCard> {
                       : 'Moved to the _rejected folder in Drive; the pipeline '
                           'skips them.',
                 ),
+                if (s.lost.isNotEmpty) ...[
+                  const Divider(height: 20),
+                  _Line(
+                    icon: Icons.phonelink_erase,
+                    color: Brand.urgent,
+                    title: '${s.lost.length} clips lost',
+                    subtitle: 'Recorded, but the files are no longer on the '
+                        'phone — usually the app was uninstalled. They are no '
+                        'longer counted as waiting.',
+                  ),
+                ],
                 if (s.imported > 0) ...[
                   const Divider(height: 20),
                   _Line(
@@ -1421,6 +1869,7 @@ class _SpeakersTab extends StatefulWidget {
 class _SpeakersTabState extends State<_SpeakersTab> {
   String _q = '';
   bool _onlyIncomplete = false;
+  bool _showRejected = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1434,7 +1883,10 @@ class _SpeakersTabState extends State<_SpeakersTab> {
       );
     }
     final q = _q.toLowerCase();
-    final shown = stats.speakers.where((s) {
+    // Rejected sessions are kept out of the list the same way they are kept
+    // out of the totals, with one chip to go and look at them.
+    final base = _showRejected ? stats.rejectedSpeakers : stats.active;
+    final shown = base.where((s) {
       if (!s.matches(q)) return false;
       if (!_onlyIncomplete) return true;
       final n = stats.liveOf(s.id).length;
@@ -1463,6 +1915,15 @@ class _SpeakersTabState extends State<_SpeakersTab> {
                     selected: _onlyIncomplete,
                     onSelected: (v) => setState(() => _onlyIncomplete = v),
                   ),
+                  if (stats.rejectedSpeakers.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    FilterChip(
+                      label: Text(
+                          'Rejected (${stats.rejectedSpeakers.length})'),
+                      selected: _showRejected,
+                      onSelected: (v) => setState(() => _showRejected = v),
+                    ),
+                  ],
                   const Spacer(),
                   Text('${shown.length} shown',
                       style: Theme.of(context).textTheme.bodySmall),
@@ -1474,14 +1935,22 @@ class _SpeakersTabState extends State<_SpeakersTab> {
         }
         final s = shown[index - 1];
         final live = stats.liveOf(s.id);
-        final rejected =
-            (stats.bySpeaker[s.id] ?? const []).where((c) => !c.live).length;
+        final all = stats.bySpeaker[s.id] ?? const <ClipView>[];
+        // Lost and thrown out used to share the word "rejected", which made
+        // a session that had simply been reinstalled over look as though
+        // somebody had judged it. They are counted apart now.
+        final lost = all.where((c) => c.lost).length;
+        final thrown = all.where((c) => c.thrownOut).length;
         final phrases = live.map((c) => c.phraseId).toSet().length;
         final done = live.length >= s.targetClips;
+        final waiting = stats.holdingOf(s.id).length;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: Card(
+          child: Opacity(
+            // A rejected session is still readable, visibly set aside.
+            opacity: s.rejected ? 0.55 : 1,
+            child: Card(
             child: ListTile(
               leading: CircleAvatar(
                 backgroundColor: live.isEmpty
@@ -1505,15 +1974,25 @@ class _SpeakersTabState extends State<_SpeakersTab> {
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
+                  if (s.rejected)
+                    const _Tag(text: 'NOT COUNTED', color: Brand.urgent),
+                  if (s.deletionRequested)
+                    const _Tag(text: 'delete me', color: Brand.urgent),
                   if (!done && live.isNotEmpty)
                     _Tag(
                         text: '${s.targetClips - live.length} left',
                         color: Brand.amber),
-                  if (s.deletionRequested)
-                    const _Tag(text: 'delete me', color: Brand.urgent),
-                  if (live.isEmpty) const _Tag(text: 'empty', color: Colors.grey),
-                  if (rejected > 0)
-                    _Tag(text: '$rejected rejected', color: Colors.grey),
+                  if (live.isEmpty && !s.rejected)
+                    const _Tag(text: 'empty', color: Colors.grey),
+                  // History of bad takes belongs to a session still being
+                  // worked on. Once it is finished the card says so and
+                  // nothing else; the detail screen keeps the full record.
+                  if (!done && lost > 0)
+                    _Tag(text: '$lost lost', color: Brand.urgent),
+                  if (!done && thrown > 0)
+                    _Tag(text: '$thrown thrown out', color: Colors.grey),
+                  if (done && waiting > 0)
+                    _Tag(text: 'to move in', color: Brand.amber),
                 ],
               ),
               subtitle: Text(
@@ -1530,6 +2009,7 @@ class _SpeakersTabState extends State<_SpeakersTab> {
                     speaker: s, clips: stats.bySpeaker[s.id] ?? const []),
               )),
             ),
+          ),
           ),
         );
       },
@@ -1687,6 +2167,19 @@ class SpeakerDetailScreen extends StatelessWidget {
                             color: Brand.urgent, fontWeight: FontWeight.w600),
                       ),
                     ),
+                  if (speaker.rejected)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        'Rejected — left out of every total and out of '
+                        'training. The number is still held for this '
+                        'session.'
+                        '${speaker.rejectedReason.isEmpty ? "" : "\nReason: ${speaker.rejectedReason}"}'
+                        '${speaker.rejectedBy.isEmpty ? "" : "\nBy ${speaker.rejectedBy}"}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, height: 1.35),
+                      ),
+                    ),
                   Text(
                     'by ${speaker.collectorName}'
                     '${speaker.publishable ? " · publishable" : " · not for publication"}',
@@ -1744,8 +2237,189 @@ class _SpeakerActions extends StatefulWidget {
   State<_SpeakerActions> createState() => _SpeakerActionsState();
 }
 
+/// A barrier the person cannot dismiss while files are moving in Drive.
+/// Moving twenty clips is twenty round trips; leaving the screen live would
+/// invite a second tap on top of the first.
+Future<void> _working(BuildContext context, String what) => showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        content: Row(
+          children: [
+            const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 16),
+            Expanded(child: Text(what)),
+          ],
+        ),
+      ),
+    );
+
 class _SpeakerActionsState extends State<_SpeakerActions> {
   bool _busy = false;
+
+  /// Master admin only: take this whole session out of the corpus.
+  ///
+  /// Kept apart from "delete" on purpose. This one is reversible — the row,
+  /// the clips and the number all stay — so it is the safe way to stop a bad
+  /// session from counting while the volunteer re-records.
+  Future<void> _reject() async {
+    final s = widget.speaker;
+    final live = widget.clips.where((c) => c.live).length;
+    final why = TextEditingController();
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Reject ${s.id}?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'It stops counting everywhere — the speaker total, the '
+              'phrase breakdown, the collector figures and the manifest '
+              'training reads'
+              '${live == 0 ? "" : ", including its $live clips"}.\n\n'
+              'Nothing is deleted. ${s.id} keeps its number, so when this '
+              'volunteer re-records you can put it straight back from this '
+              'screen. To hand the number to someone else instead, use the '
+              'bin at the top of this screen — that one cannot be undone.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: why,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Why (kept on the record)',
+                hintText: 'e.g. mouth out of frame in every clip',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep it')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Reject')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _busy = true);
+    final refs = widget.clips
+        .where((c) => c.live && c.uploaded)
+        .map((c) => c.moveRef)
+        .whereType<MoveRef>()
+        .toList();
+    unawaited(_working(context, 'Rejecting ${s.id}…'));
+    try {
+      await SyncService.instance.rejectSpeaker(
+          s.id, why.text.trim().isEmpty ? 'Rejected by master' : why.text.trim());
+      // The list the notebook reads comes first: it is one small file, it
+      // never fails for want of file ownership, and on its own it is enough
+      // to keep this session out of the next model. Moving the videos is
+      // the tidy-up that follows.
+      final listed = await SyncService.instance.publishSkipList();
+      final report = await SyncService.instance.moveSpeakerClips(
+        speakerId: s.id,
+        zone: CorpusZone.rejected,
+        clips: refs,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(); // the working dialog
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 6),
+        content: Text([
+          '${s.id} rejected — out of every total, number still held',
+          if (!listed)
+            'Could not update the skip list on Drive; training may still see '
+                'it until you reconnect Drive',
+          if (refs.isNotEmpty) 'Videos: ${report.summary}',
+        ].join('. ')),
+      ));
+      Navigator.of(context).pop(); // back to the list
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not reject it: $e')));
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  /// Master admin only: put a rejected session back after a re-record.
+  Future<void> _restore() async {
+    final s = widget.speaker;
+    final live = widget.clips.where((c) => c.live).length;
+    final complete = live >= s.targetClips;
+    final comingBack = complete
+        ? 'complete.'
+        : 'unfinished, and will sit under "Unfinished only" until the '
+            'missing clips are recorded.';
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Put ${s.id} back?'),
+        content: Text(
+          'It counts again everywhere, and training picks its clips up with '
+          'the rest.\n\n'
+          'It holds $live of ${s.targetClips} clips right now, so it comes '
+          'back as $comingBack',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Leave it out')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Put it back')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _busy = true);
+    final refs = widget.clips
+        .where((c) => c.live && c.uploaded)
+        .map((c) => c.moveRef)
+        .whereType<MoveRef>()
+        .toList();
+    unawaited(_working(context, 'Putting ${s.id} back…'));
+    try {
+      await SyncService.instance.restoreSpeaker(s.id, complete: complete);
+      final listed = await SyncService.instance.publishSkipList();
+      // A finished session goes straight back into P01..P20; one that is
+      // still short goes to the holding folder, same as any other
+      // unfinished session, and moves in when it is done.
+      final report = await SyncService.instance.moveSpeakerClips(
+        speakerId: s.id,
+        zone: complete ? CorpusZone.corpus : CorpusZone.holding,
+        clips: refs,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 6),
+        content: Text([
+          '${s.id} is back${complete ? "" : " — still unfinished"}',
+          if (!listed) 'Could not update the skip list on Drive',
+          if (refs.isNotEmpty) 'Videos: ${report.summary}',
+        ].join('. ')),
+      ));
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not put it back: $e')));
+        setState(() => _busy = false);
+      }
+    }
+  }
 
   Future<void> _makeCode() async {
     setState(() => _busy = true);
@@ -1925,6 +2599,24 @@ class _SpeakerActionsState extends State<_SpeakerActions> {
             icon: const Icon(Icons.link_off),
             label: Text('Linked to ${s.claimedBy} — unlink'),
           ),
+        ],
+        // Rejecting and putting back are master's call alone: they move the
+        // numbers the whole team reads off the dashboard.
+        if (Team.isMaster) ...[
+          const SizedBox(height: 8),
+          if (s.rejected)
+            FilledButton.icon(
+              onPressed: _busy ? null : _restore,
+              icon: const Icon(Icons.undo),
+              label: const Text('Put this session back in the corpus'),
+            )
+          else
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: Brand.urgent),
+              onPressed: _busy ? null : _reject,
+              icon: const Icon(Icons.block),
+              label: const Text('Reject this session (keeps the number)'),
+            ),
         ],
       ],
     );

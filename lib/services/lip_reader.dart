@@ -175,8 +175,13 @@ class LipReader {
   /// Turns the raw frames of one clip into `frames` x `size` x `size` bytes.
   /// Returns (crops, null), or (null, reason) when the face was not found
   /// often enough to trust the clip.
+  /// [fallback] crops the middle of the frame when no face was found, so a
+  /// detector that fails on this phone is an inconvenience rather than a
+  /// dead end. The guess is worse than a real detection and the caller is
+  /// expected to say so.
   Future<(Uint8List?, String?)> crop(
-      List<RawFrame> raw, int sensorOrientation, ModelCard card) async {
+      List<RawFrame> raw, int sensorOrientation, ModelCard card,
+      {bool fallback = false}) async {
     if (raw.length < card.frames ~/ 3) return (null, 'short');
     final rotation = InputImageRotationValue.fromRawValue(sensorOrientation) ??
         InputImageRotation.rotation270deg;
@@ -214,10 +219,24 @@ class LipReader {
         debugPrint('face detect: $e');
       }
     }
-    if (tried == 0 || found / tried < 0.6) return (null, 'no-face');
+    if (tried == 0 || found / tried < 0.6) {
+      if (!fallback) return (null, 'no-face');
+      // Where a face usually sits when somebody holds a phone up to speak.
+      final f = frames.first;
+      final upright = sensorOrientation % 180 == 90;
+      final w = (upright ? f.height : f.width).toDouble();
+      final h = (upright ? f.width : f.height).toDouble();
+      final guess = _Pose(w / 2, h * 0.62, h * 0.30, 0);
+      for (var i = 0; i < card.frames; i++) {
+        poses[i] = guess;
+      }
+    }
 
     // Fill the gaps: glide between detections, hold at the ends.
-    final known = [for (var i = 0; i < poses.length; i++) if (poses[i] != null) i];
+    final known = <int>[
+      for (var i = 0; i < poses.length; i++)
+        if (poses[i] != null) i
+    ];
     _Pose at(int i) {
       if (poses[i] != null) return poses[i]!;
       var before = -1, after = -1;
