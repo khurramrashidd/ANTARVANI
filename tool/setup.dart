@@ -451,6 +451,48 @@ service cloud.firestore {
       allow read, write: if signedIn() && email() == ownerEmail;
     }
 
+    // Volunteers offering to be recorded, from the form on the public page.
+    //
+    // This is the one collection a stranger may write to, so it is the one
+    // worth being careful about. Create only — never read, never change,
+    // never delete — and only a row that looks like the form: the exact
+    // field names, every one a short string, the consent and age boxes
+    // actually ticked, and no extra keys smuggled in. A visitor cannot read
+    // back what anyone else submitted, including their own row.
+    //
+    // The team reads them on the dashboard; only the master clears one out.
+    match /signups/{id} {
+      allow read:   if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isMaster();
+      allow create: if
+        request.resource.data.keys().hasOnly(
+          ['name','mobile','email','address','languages','availability',
+           'consent','over18','createdUtc','source'])
+        && request.resource.data.keys().hasAll(
+          ['name','mobile','consent','over18','createdUtc'])
+        && request.resource.data.consent == true
+        && request.resource.data.over18 == true
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 1
+        && request.resource.data.name.size() < 120
+        && request.resource.data.mobile is string
+        && request.resource.data.mobile.size() > 6
+        && request.resource.data.mobile.size() < 24
+        && (!('email' in request.resource.data.keys()) ||
+            (request.resource.data.email is string &&
+             request.resource.data.email.size() < 160))
+        && (!('address' in request.resource.data.keys()) ||
+            (request.resource.data.address is string &&
+             request.resource.data.address.size() < 400))
+        && (!('languages' in request.resource.data.keys()) ||
+            (request.resource.data.languages is string &&
+             request.resource.data.languages.size() < 120))
+        && (!('availability' in request.resource.data.keys()) ||
+            (request.resource.data.availability is string &&
+             request.resource.data.availability.size() < 200));
+    }
+
     // Anything not named above is denied.
     match /{document=**} {
       allow read, write: if false;

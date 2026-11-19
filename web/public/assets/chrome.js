@@ -17,9 +17,10 @@
     speakers: 'Speakers',
     collectors: 'Collectors',
     breakdown: 'Phrase breakdown',
-    results: 'Training results',
+    results: 'How well it works',
     figures: 'Figures',
     phrases: 'The twenty phrases',
+    signups: 'Volunteer signups',
     team: 'Team access',
   };
 
@@ -80,6 +81,33 @@
     rail?.classList.contains('open') ? closeRail() : openRail();
   });
   scrim?.addEventListener('click', closeRail);
+
+  /* ------------------------------------------- the public page's drawer */
+  // The project page has no rail, so its hamburger drives a slide-in panel
+  // instead. Picking a section closes it, which is the behaviour people
+  // expect and the easiest one to forget.
+  const drawer = $('#drawer');
+  const dScrim = $('#drawerScrim');
+  const burger = $('#burger');
+
+  function openDrawer() {
+    drawer?.classList.add('open');
+    if (dScrim) dScrim.hidden = false;
+    burger?.setAttribute('aria-expanded', 'true');
+    $('#drawerClose')?.focus();
+  }
+  function shutDrawer() {
+    drawer?.classList.remove('open');
+    if (dScrim) dScrim.hidden = true;
+    burger?.setAttribute('aria-expanded', 'false');
+  }
+  burger?.addEventListener('click', () => {
+    drawer?.classList.contains('open') ? shutDrawer() : openDrawer();
+  });
+  $('#drawerClose')?.addEventListener('click', shutDrawer);
+  dScrim?.addEventListener('click', shutDrawer);
+  drawer?.querySelectorAll('a').forEach((a) =>
+    a.addEventListener('click', shutDrawer));
 
   /* -------------------------------------------------------------- clock */
   // Minutes, not seconds: a ticking seconds display on a dashboard is
@@ -199,7 +227,7 @@
   });
   $('#boxX')?.addEventListener('click', closeBox);
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeBox(); closeRail(); }
+    if (e.key === 'Escape') { closeBox(); closeRail(); shutDrawer(); }
   });
 
   /* Let dashboard.js drive the router once it has signed the user in. On the

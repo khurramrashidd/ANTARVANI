@@ -4,6 +4,91 @@ Zip files are numbered: `ANTARVANI_app_v01.zip`, `v02`, `v03` … Always use the
 highest number. (This is the delivery number, not the app's `version:` in
 pubspec.yaml, which stays 1.0.0+3 until you decide to change it.)
 
+## v44 — 19 Nov 2026
+
+**A dark header and footer, and a hamburger drawer.** The project page had a
+light bar on a light body and nothing holding the edges, so it read as a
+document rather than a product. The bar and the footer are now deep ink with
+the teal accent, the content container is wider, and alternate sections carry
+a tint so nothing floats in white. The hamburger opens a dark side panel with
+every section and a Volunteer button; it closes on a pick, on the scrim and
+on Escape.
+
+**Volunteers can register from the public page.** Name, mobile, email, where
+they are, languages, when they are free, a confirmation they are 18 or over
+and a consent tick. The rows land in a new `signups` collection and appear on
+the dashboard under Volunteer signups, which is admin-only.
+
+`firestore.rules` gains the matching block, and it is the part worth reading
+rather than trusting:
+
+- `create` only. No read, no update, no delete for a visitor, so nobody can
+  read back what anyone else submitted — including their own row.
+- The row must carry exactly the expected keys and no others, each a short
+  string of a checked length, with `consent` and `over18` both literally
+  `true`.
+- Reading is `isAdmin()`; deleting is master only.
+
+The checks in `site.js` exist to give a person a useful message before they
+hit a refusal. They decide nothing: the rules do.
+
+**Run `dart run tool/setup.dart` and deploy the rules** (`firebase deploy
+--only firestore:rules,hosting`) or the form will be refused by the database.
+
+**A CSS specificity bug, found by looking at a screenshot.** `.links a`
+scores 0,1,1 and `.btn-primary` only 0,1,0, so the nav rule repainted the
+Volunteer button's label in the link colour — dark teal on a teal pill,
+unreadable. The rule is `.links a:not(.btn)` now.
+
+## v43 — 19 Nov 2026
+
+(Numbering continues from the zip you renamed to 42.)
+
+**The public page no longer carries any project data.** It used to read
+`data/figures.json` and show the corpus counts, the measured accuracy and
+all fourteen figures to anyone who opened the address. It is now a page
+about the project: the problem, the twenty phrases, how the system works,
+how the recordings were gathered, the ethics rules, the team and the
+abstract — and nothing measured. `site.js` makes no request for
+`figures.json` at all, so no number can reach that page even with the file
+sitting in the deployed folder.
+
+**Caveat, stated plainly:** `web/public/data/` is still served by Firebase
+Hosting, so `…/data/figures.json` and the figure PNGs can be fetched
+directly by anyone who types the address. Nothing links to them any more,
+but that is obscurity, not access control. Hosting cannot require a sign-in
+for a static file. If those files must be genuinely private, they have to
+move to Firebase Storage behind a rule — say the word and I will do it.
+
+**The hero is a drawing now**, not real mouth crops. The filmstrip moved to
+the dashboard, behind sign-in.
+
+**The abstract opens inside the page.** Put the PDF at
+`web/public/data/abstract.pdf` and the Abstract section shows it in an
+overlay rather than sending the reader to a new tab. Until the file is
+there, the button is disabled and the section says where to put it.
+
+**The dashboard reads in plain language.** "top-1" and "top-3" meant nothing
+to anyone who had not read the paper. The result now leads with "the app
+picks the right phrase about 14 times in every 100", with the folds
+explained as splitting the volunteers into groups and testing on the group
+the app had never seen. The numbers are untouched.
+
+**Figures sit on white in both themes** and are capped in height, so a dark
+theme no longer puts a hard white rectangle around every chart and a tall
+chart no longer pushes its caption off the screen.
+
+**Signing out returns to the project page** instead of leaving the reader
+at the sign-in wall they just walked out of.
+
+**The dashboard header carries the full project title**, under the section
+name.
+
+**Who built it** on the public page now matches the Statement of Individual
+Contributions: Khurram on app, web and integration; Kinza on the training
+pipeline; Prapti and Shreya on collection. The guide block lists
+Dr. Sarang M. Patil only.
+
 ## v45 — 19 Nov 2026
 
 The app and the website disagreed about which sessions were finished, and

@@ -26,22 +26,27 @@
 </head>
 <body>
 
-<nav class="topbar">
+<nav class="topbar dark">
   <div class="wrap topbar-in">
+    <button class="burger" id="burger" type="button" aria-expanded="false"
+            aria-controls="drawer" title="Menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      <span class="sr">Open the menu</span>
+    </button>
+
     <a class="logo" href="#top">
       <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#0e7c86"/><path d="M12 34c7-8 13-11 20-11s13 3 20 11" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><path d="M22 42h20" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/></svg>
       ANTARVANI <em>अन्तर्वाणी</em>
     </a>
+
     <div class="links">
       <a href="#problem">Problem</a>
       <a href="#phrases">Phrases</a>
       <a href="#how">How it works</a>
-      <a href="#corpus">Corpus</a>
-      <a href="#model">Model</a>
-      <a href="#results">Results</a>
-      <a href="#ethics">Ethics</a>
-      <a href="#team">Team</a>
-      <a class="btn btn-sm" href="dashboard.html">Team sign-in</a>
+      <a href="#corpus">Our data</a>
+      <a href="#abstract">Abstract</a>
+      <a class="btn btn-sm btn-primary" href="#volunteer">Volunteer</a>
+      <a class="btn btn-sm ghost" href="dashboard.html">Team sign-in</a>
       <button class="theme" type="button" aria-pressed="false" title="Switch to dark">
         <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
@@ -51,28 +56,104 @@
   </div>
 </nav>
 
-<header class="wrap hero" id="top">
-  <div class="kicker"><b></b> Final-year major project · Amity University Mumbai</div>
-  <h1>A camera is the only sensor.</h1>
-  <p class="inner">अन्तर्वाणी — the voice within</p>
-  <p class="line">Twenty Hindi care phrases, read from the movement of the mouth alone.</p>
-  <p class="lede">
-    People who cannot speak — after a laryngectomy, with a tracheostomy,
-    during intensive care — are often left pointing at a card. ANTARVANI reads
-    the phrase off their lips with an ordinary Android phone. No microphone,
-    no electrodes, nothing worn on the face.
-  </p>
-  <div class="acts">
-    <a class="btn btn-primary" href="#how">How it works</a>
-    <a class="btn" href="#corpus">See the corpus</a>
+<div class="drawer-scrim" id="drawerScrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Sections">
+  <div class="drawer-top">
+    <span>ANTARVANI</span>
+    <button class="dx" id="drawerClose" type="button" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      <span class="sr">Close the menu</span>
+    </button>
   </div>
+  <nav class="drawer-nav">
+    <a href="#top">Home</a>
+    <a href="#problem">The problem</a>
+    <a href="#phrases">The twenty phrases</a>
+    <a href="#how">How it works</a>
+    <a href="#corpus">Our data</a>
+    <a href="#abstract">Abstract</a>
+    <a href="#ethics">Ethics and privacy</a>
+    <a href="#team">Team</a>
+    <a href="#volunteer">Volunteer to be recorded</a>
+  </nav>
+  <div class="drawer-foot">
+    <a class="btn btn-primary" href="#volunteer" style="width:100%;justify-content:center">Volunteer</a>
+    <a class="btn ghost-d" href="dashboard.html" style="width:100%;justify-content:center;margin-top:8px">Team sign-in</a>
+  </div>
+</aside>
 
-  <div class="strip-wrap" id="strip" hidden style="margin-top:34px">
-    <div class="strip" id="stripRail"></div>
-    <div class="strip-cap">
-      <span class="tr">What the model actually receives — 88×88 greyscale, 16 fps</span>
-      <span class="mt" id="stripWho"></span>
+<header class="wrap hero" id="top">
+  <div class="hero-grid">
+    <div>
+      <div class="kicker"><b></b> Final-year major project · Amity University Mumbai</div>
+      <h1>A camera is the only sensor.</h1>
+      <p class="inner">अन्तर्वाणी — the voice within</p>
+      <p class="line">Twenty Hindi care phrases, read from the movement of the mouth alone.</p>
+      <p class="lede">
+        People who cannot speak — after a laryngectomy, with a tracheostomy,
+        during intensive care — are often left pointing at a card. ANTARVANI
+        reads the phrase off their lips with an ordinary Android phone. No
+        microphone, no electrodes, nothing worn on the face.
+      </p>
+      <div class="acts">
+        <a class="btn btn-primary" href="#how">How it works</a>
+        <a class="btn" href="#abstract">Read the abstract</a>
+      </div>
     </div>
+
+    <!-- Camera, mouth, phrase. Drawn rather than photographed: nothing on
+         this page is a real recording. -->
+    <figure class="hero-art" aria-label="A phone camera reading a silent phrase from the mouth and speaking it aloud">
+      <svg viewBox="0 0 320 300" role="img">
+        <title>A phone reads a silent phrase from the movement of the mouth</title>
+        <rect x="18" y="26" width="128" height="222" rx="17"
+              fill="none" stroke="var(--signal)" stroke-width="2.4"/>
+        <rect x="30" y="46" width="104" height="166" rx="8"
+              fill="var(--signal-w)" stroke="none"/>
+        <circle cx="82" cy="36" r="3.1" fill="var(--signal)"/>
+        <rect x="66" y="228" width="32" height="4" rx="2" fill="var(--signal)"/>
+
+        <!-- the mouth, mid-utterance -->
+        <ellipse cx="82" cy="122" rx="35" ry="21"
+                 fill="none" stroke="var(--ink-2)" stroke-width="2.2"/>
+        <ellipse cx="82" cy="122" rx="21" ry="11" fill="var(--ink-2)" opacity=".16"/>
+
+        <!-- no sound going in: big enough to read at a glance -->
+        <g transform="translate(60 162)">
+          <rect x="-7" y="-6" width="58" height="38" rx="9"
+                fill="var(--panel)" stroke="var(--line)" stroke-width="1.4"/>
+          <path d="M11 15V9a6 6 0 0 1 12 0v6a6 6 0 0 1-12 0z" fill="none"
+                stroke="var(--ink-3)" stroke-width="1.9"/>
+          <path d="M7 15a10 10 0 0 0 20 0M17 25v4" fill="none"
+                stroke="var(--ink-3)" stroke-width="1.9" stroke-linecap="round"/>
+          <path d="M5 1l24 28" stroke="var(--bad)" stroke-width="2.6"
+                stroke-linecap="round"/>
+          <text x="38" y="19" text-anchor="middle" class="art-cap"
+                style="font-weight:600">off</text>
+        </g>
+
+        <path d="M152 137h34" stroke="var(--signal)" stroke-width="2.2"
+              stroke-linecap="round"/>
+        <path d="M180 131l7 6-7 6" fill="none" stroke="var(--signal)"
+              stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+        <!-- the phrase comes out -->
+        <rect x="196" y="100" width="112" height="74" rx="13"
+              fill="var(--panel)" stroke="var(--line)" stroke-width="1.6"/>
+        <path d="M204 174l-6 16 17-11z" fill="var(--panel)" stroke="var(--line)"
+              stroke-width="1.6" stroke-linejoin="round"/>
+        <text x="252" y="131" text-anchor="middle" class="art-hi">मुझे पानी</text>
+        <text x="252" y="154" text-anchor="middle" class="art-hi">चाहिए</text>
+
+        <g stroke="var(--signal)" stroke-width="2.2" stroke-linecap="round" fill="none">
+          <path d="M296 56a26 26 0 0 1 0 28"/>
+          <path d="M286 62a14 14 0 0 1 0 16"/>
+        </g>
+        <text x="163" y="268" text-anchor="middle" class="art-cap">
+          camera in · no sound captured · phrase spoken out
+        </text>
+      </svg>
+    </figure>
   </div>
 </header>
 
@@ -88,36 +169,33 @@
     <div class="grid g3">
       <div class="panel">
         <h3>Boards are slow</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Pointing at a
-          laminated card gets a thirsty patient a glass of water in the time it
-          takes to find the picture. Most boards carry a dozen symbols and
-          nothing a person would actually say.</p>
+        <p class="sm">Pointing at a laminated card gets a thirsty patient a
+          glass of water in the time it takes to find the picture. Most boards
+          carry a dozen symbols and nothing a person would actually say.</p>
       </div>
       <div class="panel">
         <h3>Sensors are intrusive</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Surface
-          electrodes, throat microphones and ultrasound probes all work, and all
-          require equipment on the face or neck of someone already having a hard
-          day.</p>
+        <p class="sm">Surface electrodes, throat microphones and ultrasound
+          probes all work, and all require equipment on the face or neck of
+          someone already having a hard day.</p>
       </div>
       <div class="panel">
         <h3>Hindi is underserved</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Published
-          lip-reading corpora are overwhelmingly English. A hospital ward in
-          Maharashtra needs the phrases people there say, in the language they
-          say them in.</p>
+        <p class="sm">Published lip-reading research is overwhelmingly
+          English. A hospital ward in Maharashtra needs the phrases people
+          there say, in the language they say them in.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="band" id="phrases">
+<section class="band tint" id="phrases">
   <div class="wrap">
     <div class="s-head">
       <h2>Twenty phrases that matter at a bedside.</h2>
       <p>Chosen for need, not for how easy they are to tell apart. Each is a
-        whole utterance, recorded in a fixed three-second window, so the model
-        learns a phrase rather than stitching one together from letters.</p>
+        whole utterance, said in a three-second window, so the system learns a
+        phrase rather than stitching one together from letters.</p>
     </div>
     <div class="phrase-grid" id="phraseGrid"></div>
   </div>
@@ -128,125 +206,222 @@
     <div class="s-head">
       <h2>Camera to phrase, entirely on the phone.</h2>
       <p>Nothing is uploaded at the moment of use, and no audio is captured at
-        any stage of the project — not during collection, not during inference.</p>
+        any stage of the project — not while gathering recordings, not while
+        the app is being used.</p>
     </div>
     <div class="steps">
       <div class="step"><h4>Record</h4>
         <p>Three seconds from the front camera. The microphone is never opened.</p></div>
       <div class="step"><h4>Find the face</h4>
-        <p>MediaPipe returns 468 landmarks per frame, on device.</p></div>
+        <p>The phone locates the face and tracks the landmarks around the mouth, frame by frame.</p></div>
       <div class="step"><h4>Align and crop</h4>
-        <p>The box is rotated to level the eyes and scaled by the distance
-          between them, so the mouth fills the same area whatever the camera
-          distance.</p></div>
+        <p>The picture is straightened and scaled so the mouth fills the same
+          area whether the person sat close to the camera or far from it.</p></div>
       <div class="step"><h4>Recognise</h4>
-        <p>48 frames of 88×88 greyscale through a 3D CNN, 3.56 MB as TFLite.</p></div>
+        <p>A small neural network reads the sequence of mouth shapes and decides which phrase it was.</p></div>
       <div class="step"><h4>Personalise</h4>
-        <p>The result is blended with prototypes built from a handful of the
-          user's own recordings.</p></div>
+        <p>A few recordings from the person themselves teach it their own way
+          of making those shapes.</p></div>
       <div class="step"><h4>Speak</h4>
         <p>The phrase is read aloud in Hindi by the phone.</p></div>
     </div>
   </div>
 </section>
 
-<section class="band" id="corpus">
+<section class="band tint" id="corpus">
   <div class="wrap">
     <div class="s-head">
-      <h2>Recorded by us, from scratch.</h2>
-      <p>No dataset existed for this, so we built one — with a purpose-made
-        Android app that handles consent, speaker numbering, quality checks and
-        upload, so every clip arrives named, attributed and verifiable.</p>
+      <h2>We recorded our own data, from scratch.</h2>
+      <p>No collection of Hindi lip-reading video existed for this, so we
+        built one. Everything the system knows, it learned from recordings
+        made by this team, with consent, on ordinary phones.</p>
     </div>
-    <div class="grid g4" id="corpusStats"></div>
-    <div class="figs" id="corpusFigs" style="margin-top:20px"></div>
-  </div>
-</section>
-
-<section class="band" id="model">
-  <div class="wrap">
-    <div class="s-head">
-      <h2>Small enough to live on the phone.</h2>
-      <p>Five strided 3D convolutions reduce the clip in space and time, two 1D
-        convolutions read across what is left, and a global average gives a
-        192-dimensional embedding. No MaxPool3D and no recurrent layer: TFLite
-        supports neither, and a model that cannot be converted cannot ship.</p>
-    </div>
-    <div class="grid g4" style="margin-bottom:20px">
-      <div class="stat"><div class="n">1.77 M</div><div class="l">parameters</div></div>
-      <div class="stat"><div class="n">3.56 MB</div><div class="l">on disk, float16 TFLite</div></div>
-      <div class="stat"><div class="n">192-d</div><div class="l">embedding used for personalisation</div></div>
-      <div class="stat quiet"><div class="n">0</div><div class="l">bytes of audio, at any stage</div></div>
-    </div>
-    <div class="figs" id="modelFigs"></div>
-
-    <div class="grid g2" style="margin-top:22px">
+    <div class="grid g2">
       <div class="panel">
-        <h3>Few-shot personalisation</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">A model that
-          has never met you is guessing at a face it has not seen. Ours builds a
-          prototype per phrase from a few of the user's own clips and blends it
-          with the general model's embedding. This is the part of the project we
-          are putting forward as the contribution, and it is what makes a
-          20-phrase vocabulary workable for one real person rather than for an
-          average of forty.</p>
+        <h3>A purpose-built recording app</h3>
+        <p class="sm">We wrote an Android application specifically for
+          gathering the recordings. It handles the consent paperwork, gives
+          each volunteer a number instead of a name, walks them through the
+          phrases one at a time, checks each recording on the phone before
+          accepting it, and uploads in the background. Every clip arrives
+          named, attributed and checkable.</p>
       </div>
       <div class="panel">
-        <h3>Updating without a new install</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Retrained
-          models are published from the training notebook and picked up over the
-          air: the app verifies a SHA-256 checksum, swaps the model in and
-          carries on. No store release, no reinstall, and no clip waiting on a
-          phone is ever lost to an update.</p>
+        <h3>Checked before it counts</h3>
+        <p class="sm">A recording is only kept if the face stayed in frame,
+          the lighting was good enough and the phrase finished inside the
+          three seconds. Sessions that failed the check are set aside rather
+          than quietly mixed in, and the people who collected the recordings
+          reviewed them a second time by hand.</p>
+      </div>
+    </div>
+    <div class="notice info" style="margin-top:16px">
+      <b>The recordings and the measured results are not on this page.</b><br>
+      They are private project data. The team can see the live collection
+      progress, the recordings themselves and the measured accuracy on the
+      <a href="dashboard.html">team dashboard</a>, after signing in.
+    </div>
+  </div>
+</section>
+
+<section class="band" id="abstract">
+  <div class="wrap">
+    <div class="s-head">
+      <h2>Abstract</h2>
+      <p>The full project abstract, as submitted.</p>
+    </div>
+    <div class="panel" id="abstractCard">
+      <h3>ANTARVANI: A Camera-Only Silent Speech Interface for Hindi Care
+        Phrases with Few-Shot Personalisation</h3>
+      <p class="sm" style="margin-top:8px">B.Tech Computer Science &amp;
+        Engineering major project, Amity School of Engineering and Technology,
+        Amity University Mumbai, 2026–27.</p>
+      <div class="acts" style="margin-top:14px">
+        <button class="btn btn-primary" id="readAbstract" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5V6a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v14"/><path d="M6 17h12v3H6a2 2 0 0 1 0-4"/></svg>
+          Read it here
+        </button>
+      </div>
+      <div id="abstractNote" style="margin-top:12px"></div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="volunteer">
+  <div class="wrap">
+    <div class="s-head">
+      <h2>Be one of the voices.</h2>
+      <p>Every phrase the system understands was recorded by a person who
+        volunteered three minutes of their time. If you are in or near Navi
+        Mumbai and would like to take part, leave your details and someone
+        from the team will contact you to arrange a session.</p>
+    </div>
+
+    <div class="grid g2 vol-grid">
+      <form class="panel vol-form" id="volForm" novalidate>
+        <h3>Register as a volunteer</h3>
+
+        <label class="fld">
+          <span>Your name <i>*</i></span>
+          <input name="name" type="text" autocomplete="name" required
+                 maxlength="110" placeholder="As you would like us to call you">
+        </label>
+
+        <div class="fld-row">
+          <label class="fld">
+            <span>Mobile number <i>*</i></span>
+            <input name="mobile" type="tel" autocomplete="tel" required
+                   maxlength="22" placeholder="10-digit number">
+          </label>
+          <label class="fld">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email"
+                   maxlength="150" placeholder="optional">
+          </label>
+        </div>
+
+        <label class="fld">
+          <span>Where you are</span>
+          <textarea name="address" rows="2" maxlength="380"
+                    placeholder="Area and city is enough — we only need to know how far you would travel"></textarea>
+        </label>
+
+        <fieldset class="fld">
+          <legend>Languages you speak</legend>
+          <div class="ticks">
+            <label><input type="checkbox" name="lang" value="Hindi"> Hindi</label>
+            <label><input type="checkbox" name="lang" value="Marathi"> Marathi</label>
+            <label><input type="checkbox" name="lang" value="Urdu"> Urdu</label>
+            <label><input type="checkbox" name="lang" value="English"> English</label>
+          </div>
+        </fieldset>
+
+        <label class="fld">
+          <span>When you are usually free</span>
+          <input name="availability" type="text" maxlength="180"
+                 placeholder="e.g. weekday evenings, Saturday mornings">
+        </label>
+
+        <label class="agree">
+          <input type="checkbox" name="over18" required>
+          <span>I am 18 or older.</span>
+        </label>
+
+        <label class="agree">
+          <input type="checkbox" name="consent" required>
+          <span>I agree to the team contacting me about a recording session.
+            My details are used for that and nothing else, they are not
+            published or shared, and I can ask for them to be deleted at any
+            time.</span>
+        </label>
+
+        <button class="btn btn-primary" type="submit" id="volSubmit"
+                style="width:100%;justify-content:center;margin-top:6px">
+          Send my details
+        </button>
+
+        <div id="volNote" style="margin-top:12px"></div>
+      </form>
+
+      <div>
+        <div class="panel">
+          <h3>What taking part involves</h3>
+          <ol class="plain-ol">
+            <li>We meet you somewhere convenient and explain the project.</li>
+            <li>You sign a short consent form. It has a number on it; your
+              name stays on that form and goes nowhere else.</li>
+            <li>You say twenty short Hindi phrases to a phone camera,
+              <b>silently</b> — mouthing them, no sound. Three seconds each.</li>
+            <li>That is it. About fifteen minutes in total.</li>
+          </ol>
+        </div>
+        <div class="panel" style="margin-top:14px">
+          <h3>What we record, and what we don't</h3>
+          <p class="sm">Video of your face only, from the front camera, in
+            three-second clips. <b>The microphone is never switched on</b> —
+            not during the session, not at any point in the project.</p>
+          <p class="sm">In everything we write down you are a number, not a
+            name. Nobody under eighteen is recorded. You can ask us to delete
+            your recordings afterwards and we will, and the deletion is
+            logged.</p>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="band" id="results">
-  <div class="wrap">
-    <div class="s-head">
-      <h2 id="resultsHead">Where it stands.</h2>
-      <p id="resultsLede">Every number on this page comes out of the training
-        run itself. Nothing here is typed in by hand.</p>
-    </div>
-    <div id="resultsBody"></div>
-  </div>
-</section>
-
-<section class="band" id="ethics">
+<section class="band tint" id="ethics">
   <div class="wrap">
     <div class="s-head"><h2>Rules we set before the first recording.</h2></div>
     <div class="grid g2">
       <div class="panel">
         <h3>No audio, ever</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">The
-          microphone is not opened during collection or during use. A silent
-          speech interface that records sound would be collecting exactly the
-          thing its users cannot produce, and exactly the thing a ward has no
-          right to capture.</p>
+        <p class="sm">The microphone is not opened while gathering recordings
+          or while the app is in use. A silent speech interface that recorded
+          sound would be collecting exactly the thing its users cannot
+          produce, and exactly the thing a hospital ward has no right to
+          capture.</p>
       </div>
       <div class="panel">
         <h3>Consent, per person</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Every
-          volunteer signs a numbered consent form before recording, and
-          separately decides whether their clips may ever be published. Nobody
-          under eighteen is recorded. A volunteer can ask for their recordings
-          to be deleted from inside the app, and the deletion is logged.</p>
+        <p class="sm">Every volunteer signs a numbered consent form before
+          recording, and separately decides whether their recordings may ever
+          be published. Nobody under eighteen is recorded. A volunteer can ask
+          for their recordings to be deleted from inside the app, and the
+          deletion is logged.</p>
       </div>
       <div class="panel">
         <h3>Names are not data</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Volunteers
-          appear here and in every export as a speaker number. Names live in a
-          private roster the team signs in to see. They are never in the dataset
-          manifest and never on this page.</p>
+        <p class="sm">Volunteers are a number everywhere the project writes
+          anything down. Names live in a private list the team signs in to
+          see. They are never part of the dataset and never on this page.</p>
       </div>
       <div class="panel">
         <h3>The phone, not the cloud</h3>
-        <p style="margin:8px 0 0;color:var(--ink-2);font-size:.89rem">Recognition
-          runs on the device. Clips are uploaded only during corpus collection,
-          to a folder the project controls, and never at the moment somebody is
-          using the app to say they are in pain.</p>
+        <p class="sm">Recognition runs on the device. Recordings are uploaded
+          only while the corpus is being gathered, to a folder the project
+          controls, and never at the moment somebody is using the app to say
+          they are in pain.</p>
       </div>
     </div>
   </div>
@@ -256,10 +431,10 @@
   <div class="wrap">
     <div class="s-head"><h2>Who built it</h2></div>
     <div class="grid g4">
-      <div class="panel person"><div class="av">KR</div><div class="nm">Khurram Rashid</div><div class="rl">App, pipeline, infrastructure</div></div>
-      <div class="panel person"><div class="av">KZ</div><div class="nm">Kinza Zahra</div><div class="rl">Corpus and evaluation</div></div>
-      <div class="panel person"><div class="av">PP</div><div class="nm">Prapti Patil</div><div class="rl">Collection and quality control</div></div>
-      <div class="panel person"><div class="av">SD</div><div class="nm">Shreya Deshpande</div><div class="rl">Phrase design and analysis</div></div>
+      <div class="panel person"><div class="av">KR</div><div class="nm">Khurram Rashid</div><div class="rl">App, web platform and integration</div></div>
+      <div class="panel person"><div class="av">KZ</div><div class="nm">Kinza Zahra</div><div class="rl">Training pipeline and evaluation</div></div>
+      <div class="panel person"><div class="av">PP</div><div class="nm">Prapti Patil</div><div class="rl">Corpus collection</div></div>
+      <div class="panel person"><div class="av">SD</div><div class="nm">Shreya Deshpande</div><div class="rl">Corpus collection</div></div>
     </div>
     <div class="panel person" style="margin-top:16px">
       <div class="rl">Project guide</div>
@@ -269,27 +444,64 @@
   </div>
 </section>
 
-<footer class="site-foot">
-  <div class="wrap in">
-    <span>ANTARVANI · B.Tech CSE major project · Amity University Mumbai</span>
-    <span style="margin-left:auto" id="builtAt"></span>
+<footer class="site-foot dark">
+  <div class="wrap">
+    <div class="foot-g">
+      <div>
+        <h4>ANTARVANI <span class="deva">अन्तर्वाणी</span></h4>
+        <p class="sm" style="max-width:34ch">A camera-only silent speech
+          interface for twenty Hindi care phrases. No microphone is opened at
+          any stage.</p>
+      </div>
+      <div>
+        <h4>The project</h4>
+        <ul>
+          <li><a href="#problem">The problem</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#corpus">Our data</a></li>
+          <li><a href="#abstract">Abstract</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Take part</h4>
+        <ul>
+          <li><a href="#volunteer">Volunteer to be recorded</a></li>
+          <li><a href="#ethics">Ethics and privacy</a></li>
+          <li><a href="dashboard.html">Team sign-in</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Built at</h4>
+        <ul>
+          <li>Amity School of Engineering</li>
+          <li>and Technology</li>
+          <li>Amity University Mumbai</li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-b">
+      <span>B.Tech CSE major project · guided by Dr. Sarang M. Patil</span>
+      <span style="margin-left:auto" id="builtAt"></span>
+    </div>
   </div>
 </footer>
 
-<div class="box" id="box" hidden role="dialog" aria-modal="true" aria-label="Figure">
-  <button class="x" id="boxX" type="button" title="Close">
+<!-- the abstract, shown in the page rather than in a new tab -->
+<div class="box" id="pdfBox" hidden role="dialog" aria-modal="true" aria-label="Project abstract">
+  <button class="x" id="pdfClose" type="button" title="Close">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     <span class="sr">Close</span>
   </button>
-  <div>
-    <img id="boxImg" alt="">
-    <div class="cap" id="boxCap"></div>
+  <div class="pdfwrap">
+    <iframe id="pdfFrame" title="Project abstract"></iframe>
+    <div class="cap">Abstract · ANTARVANI</div>
   </div>
 </div>
 
+<script src="assets/firebase-config.js"></script>
 <script src="assets/theme.js"></script>
 <script src="assets/phrases.js"></script>
 <script src="assets/chrome.js"></script>
-<script src="assets/site.js"></script>
+<script type="module" src="assets/site.js"></script>
 </body>
 </html>

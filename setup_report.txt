@@ -1,4 +1,4 @@
-ANTARVANI setup  2026-11-19 19:34:46.449921
+ANTARVANI setup  2026-11-19 20:23:39.787896
 Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 1. Project folder ===========================================
@@ -16,7 +16,7 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
   [OK]    .firebaserc -> antarvaani-the-voice
   [OK]    firebase.json has the firestore section
   [OK]    firebase.json has the hosting section
-  [OK]    firestore.rules is the ANTARVANI version
+  [FIXED] firestore.rules written (master = khurramrashid0786@gmail.com)
   [OK]    firestore.indexes.json
 
 === 5. Firebase login ===========================================
@@ -78,6 +78,8 @@ Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
   [OK]    flutter test passed
 
 === SUMMARY =====================================================
+  Fixed this run:
+    - firestore.rules written (master = khurramrashid0786@gmail.com)
 
   ALL GREEN. Plug in a phone and run:   flutter run
   APK for the team:                     flutter build apk --release

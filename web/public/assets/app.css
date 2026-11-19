@@ -858,12 +858,15 @@ tbody tr.r-none td:first-child { box-shadow: inset 3px 0 0 var(--line); }
 .logo em { font-style: normal; font-family: var(--deva); font-weight: 500; color: var(--ink-3); font-size: .9rem; }
 
 .links { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.links a {
+/* :not(.btn) matters. `.links a` scores 0,1,1 and .btn-primary only 0,1,0,
+   so without it this rule repainted the Volunteer button's label in the
+   link colour — dark teal text on a teal pill, invisible. */
+.links a:not(.btn) {
   padding: 7px 10px; border-radius: var(--r-s);
   color: var(--ink-2); font-size: .89rem; font-weight: 500; text-decoration: none;
   white-space: nowrap;
 }
-.links a:hover { background: var(--line-2); color: var(--ink); }
+.links a:not(.btn):hover { background: var(--line-2); color: var(--ink); }
 .links .btn { margin-left: 6px; }
 
 /* padding-block, not the shorthand: .hero also carries .wrap, and a
@@ -973,3 +976,232 @@ tr.clips-row:hover > td { background: var(--panel-2); }
   background: #000;
   display: block;
 }
+
+/* ===================================== the full project title in the head */
+.head-t { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.head-t h1 { font-size: 1rem; line-height: 1.2; }
+.head-t .proj {
+  font-size: .72rem;
+  color: var(--ink-3);
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46ch;
+}
+@media (max-width: 1100px) { .head-t .proj { display: none; } }
+
+/* ===================================================== the abstract, inline */
+.pdfwrap { width: min(980px, 94vw); }
+#pdfFrame {
+  width: 100%;
+  height: min(78vh, 900px);
+  border: 0;
+  border-radius: var(--r-s);
+  background: #fff;
+  display: block;
+}
+
+/* ====================================================== the hero drawing */
+.hero-grid {
+  display: grid;
+  gap: clamp(22px, 4vw, 48px);
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr);
+  align-items: center;
+}
+.hero-art { margin: 0; min-width: 0; }
+.hero-art svg { width: 100%; height: auto; display: block; }
+.hero-art .art-hi {
+  font-family: var(--deva);
+  font-size: 19px;
+  font-weight: 500;
+  fill: var(--ink);
+}
+.hero-art .art-cap { font-size: 11.5px; fill: var(--ink-3); }
+@media (max-width: 880px) {
+  .hero-grid { grid-template-columns: minmax(0, 1fr); }
+  .hero-art { max-width: 420px; margin-top: 8px; }
+}
+
+/* A figure is a document, so it sits on white in both themes — a matplotlib
+   PNG has a white background of its own, and on a dark panel the difference
+   showed as a hard rectangle around every chart. Capped in height as well,
+   so a tall figure does not push the caption off the screen; the full size
+   is one click away. */
+.fig button.shot {
+  background: #fff;
+  display: grid;
+  place-items: center;
+  padding: 10px;
+}
+.fig img {
+  max-height: 460px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+.fig.wide img { max-height: 400px; }
+
+.sm { font-size: .89rem; color: var(--ink-2); margin: 8px 0 0; }
+
+/* ============================================ dark chrome, public page */
+.topbar.dark {
+  background: #10151b;
+  border-bottom: 1px solid #1e2630;
+  backdrop-filter: none;
+}
+.topbar.dark .topbar-in { height: 64px; }
+.topbar.dark .logo { color: #f2f5f7; }
+.topbar.dark .logo em { color: #8d99a6; }
+.topbar.dark .links a:not(.btn) { color: #c3ccd5; }
+.topbar.dark .links a:not(.btn):hover { background: #1b232d; color: #fff; }
+.topbar.dark .theme {
+  background: transparent; border-color: #2b3642; color: #c3ccd5;
+}
+.topbar.dark .theme:hover { color: #fff; border-color: #44515f; }
+.btn.ghost {
+  background: transparent; border-color: #38434f; color: #e6ebef;
+}
+.btn.ghost:hover { border-color: #6b7784; color: #fff; }
+
+.burger {
+  display: inline-grid;
+  place-items: center;
+  width: 38px; height: 38px;
+  margin-right: 4px;
+  border: 1px solid #2b3642;
+  border-radius: var(--r-s);
+  background: transparent;
+  color: #dfe5ea;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.burger:hover { background: #1b232d; color: #fff; }
+.burger svg { width: 19px; height: 19px; }
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(320px, 88vw);
+  z-index: 70;
+  background: #10151b;
+  color: #e9eef2;
+  border-right: 1px solid #1e2630;
+  transform: translateX(-102%);
+  transition: transform .22s ease;
+  display: flex;
+  flex-direction: column;
+}
+.drawer.open { transform: none; }
+.drawer-scrim {
+  position: fixed; inset: 0; z-index: 65;
+  background: rgba(6, 9, 12, .55);
+}
+.drawer-top {
+  display: flex; align-items: center;
+  height: 64px; padding: 0 14px 0 20px;
+  border-bottom: 1px solid #1e2630;
+  font-weight: 700; letter-spacing: .01em;
+}
+.dx {
+  margin-left: auto;
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 1px solid #2b3642; border-radius: var(--r-s);
+  background: transparent; color: #c3ccd5; cursor: pointer;
+}
+.dx:hover { color: #fff; }
+.dx svg { width: 17px; height: 17px; }
+.drawer-nav { flex: 1 1 auto; padding: 12px 12px; overflow-y: auto; }
+.drawer-nav a {
+  display: block;
+  padding: 11px 12px;
+  border-radius: var(--r-s);
+  color: #c3ccd5;
+  text-decoration: none;
+  font-size: .95rem;
+  font-weight: 500;
+}
+.drawer-nav a:hover { background: #1b232d; color: #fff; }
+.drawer-foot { padding: 14px 16px 20px; border-top: 1px solid #1e2630; }
+.btn.ghost-d {
+  background: transparent; border-color: #38434f; color: #e6ebef;
+}
+.btn.ghost-d:hover { border-color: #6b7784; color: #fff; }
+
+/* dark footer */
+.site-foot.dark {
+  background: #10151b;
+  border-top: 0;
+  color: #9aa6b2;
+  padding: 36px 0 30px;
+}
+.site-foot.dark h4 { color: #f2f5f7; margin-bottom: 9px; }
+.site-foot.dark .sm { color: #9aa6b2; }
+.site-foot.dark a { color: #c3ccd5; text-decoration: none; }
+.site-foot.dark a:hover { color: var(--signal-2); text-decoration: underline; }
+.site-foot.dark .foot-b {
+  border-top: 1px solid #1e2630;
+  margin-top: 26px; padding-top: 16px;
+  max-width: none;
+}
+
+/* ===================================== wider body, and bands that fill it */
+.wrap { max-width: 1280px; }
+section.band.tint { background: var(--panel-2); }
+[data-theme="dark"] section.band.tint { background: #11151a; }
+
+@media (max-width: 1040px) {
+  .topbar.dark .links a:not(.btn) { display: none; }
+}
+@media (max-width: 560px) {
+  .topbar.dark .links .btn.ghost { display: none; }
+}
+
+/* ============================================== the volunteer form */
+.vol-grid { align-items: start; }
+.vol-form { display: block; }
+.fld { display: block; margin-top: 14px; }
+.fld > span, .fld > legend {
+  display: block;
+  font-size: .83rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 5px;
+  padding: 0;
+}
+.fld i { color: var(--bad); font-style: normal; }
+.fld input[type="text"], .fld input[type="tel"], .fld input[type="email"],
+.fld textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 .93rem var(--sans);
+  resize: vertical;
+}
+.fld input::placeholder, .fld textarea::placeholder { color: var(--ink-3); }
+.fld input:focus, .fld textarea:focus {
+  outline: none; border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-w);
+}
+fieldset.fld { border: 0; margin-inline: 0; padding: 0; }
+.fld-row { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+@media (max-width: 520px) { .fld-row { grid-template-columns: 1fr; } }
+
+.ticks { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.ticks label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: .9rem; color: var(--ink);
+}
+.agree {
+  display: flex; gap: 10px; margin-top: 14px;
+  font-size: .86rem; color: var(--ink-2); line-height: 1.5;
+}
+.agree input { margin-top: 3px; flex: 0 0 auto; }
+input[type="checkbox"] { accent-color: var(--signal); width: 16px; height: 16px; }
+
+.plain-ol { margin: 10px 0 0; padding-left: 20px; }
+.plain-ol li { font-size: .89rem; color: var(--ink-2); margin-bottom: 7px; }

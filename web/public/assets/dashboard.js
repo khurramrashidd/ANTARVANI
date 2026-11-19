@@ -140,7 +140,13 @@ $('#signIn').addEventListener('click', async () => {
   }
 });
 
-$('#signOut')?.addEventListener('click', () => signOut(auth));
+// Signing out lands on the project page, not on the sign-in wall: somebody
+// who has just left the dashboard is done with it, and leaving them staring
+// at the door they walked out of reads as a failed sign-out.
+$('#signOut')?.addEventListener('click', async () => {
+  try { await signOut(auth); } catch (_) { /* leaving anyway */ }
+  location.href = 'index.html';
+});
 $('#refresh')?.addEventListener('click', () => { if (window.__me) load(); });
 
 if (auth) {
@@ -180,7 +186,7 @@ if (auth) {
 }
 
 /* ================================================================= load */
-const DATA = { speakers: [], clips: [], users: [], web: null, ok: false };
+const DATA = { speakers: [], clips: [], users: [], signups: [], web: null, ok: false };
 
 async function load() {
   set('overview', '<div class="grid g4">'
@@ -226,7 +232,18 @@ async function readFirestore() {
       us.forEach((d) => users.push({ email: d.id, ...d.data() }));
     } catch (_) { users = []; }
 
-    return { speakers, clips, users };
+    // Volunteer registrations from the public form. Admin-only in the
+    // rules, so a plain member's refusal here is expected and must not
+    // bring the whole page down with it.
+    let signups = [];
+    try {
+      const sg = await getDocs(collection(db, 'signups'));
+      sg.forEach((d) => signups.push({ id: d.id, ...d.data() }));
+      signups.sort((a, b) =>
+        String(b.createdUtc || '').localeCompare(String(a.createdUtc || '')));
+    } catch (_) { signups = []; }
+
+    return { speakers, clips, users, signups };
   } catch (e) {
     return { error: e.code || e.message };
   }
@@ -292,6 +309,9 @@ function renderAll() {
       undefined, { hour: '2-digit', minute: '2-digit' })}`;
     $('#cSpeakers').textContent = d.active.length;
   }
+  const nSign = DATA.signups.length;
+  const cS = $('#cSignups');
+  if (cS) cS.textContent = nSign || '';
   const nFigs = DATA.web?.figures?.length || 0;
   $('#cFigures').textContent = nFigs || '';
   $('#cResults').textContent = DATA.web?.results ? '1' : '';
@@ -306,6 +326,7 @@ function renderAll() {
   results();
   figures();
   phrases();
+  signups();
 }
 
 /* ============================================================= overview */
@@ -638,98 +659,146 @@ function breakdown(d) {
 }
 
 /* ============================================================== results */
+/* Written for somebody who has not read the paper. The numbers are exactly
+   the ones the notebook produced; only the words around them are plain.
+   "top-1" means nothing to a visitor, and a dashboard that has to be
+   explained out loud is a dashboard that failed. */
 function results() {
   const w = DATA.web;
 
   if (!w) {
-    set('results', head('Training results') + empty(
-      'No export from Colab yet',
-      `<p>Run <code>pipeline/ANTARVANI_figures.ipynb</code>, download
+    set('results', head('How well it works') + empty(
+      'No results yet',
+      `<p>The numbers appear here once the figures notebook has been run.
+       Run <code>pipeline/ANTARVANI_figures.ipynb</code>, download
        <code>antarvani_web_data.zip</code> from its last section, and unzip
        it into <code>web/public/data/</code> so that folder holds
        <code>figures.json</code> next to the PNGs. Then deploy again.</p>
        <p style="margin:0">Until then this page shows nothing rather than a
-       placeholder number.</p>`));
+       made-up number.</p>`));
     return;
   }
 
   if (!w.results) {
-    set('results', head('Training results',
-      `The corpus has been exported, but no training run has been recorded
-       yet: ${w.corpus?.speakers ?? '—'} speakers,
-       ${w.corpus?.clips ?? '—'} clips, about ${w.corpus?.minutes ?? '—'}
-       minutes of video.`)
-      + empty('The model has not been trained on this corpus yet',
+    set('results', head('How well it works',
+      'The recordings have been gathered, but the model has not been trained '
+      + 'on them yet.')
+      + empty('Not tested yet',
         `<p style="margin:0">Run <code>ANTARVANI_train.ipynb</code> to the end,
-         then re-run the figures notebook and re-deploy.</p>`));
+         then re-run the figures notebook and deploy again.</p>`));
     return;
   }
 
   const r = w.results;
   const lift = r.chance > 0 ? r.top1 / r.chance : 0;
+  const inHundred = Math.round(r.top1 * 100);
+  const inHundred3 = Math.round(r.top3 * 100);
 
   let h = '';
+
   h += r.atChance
-    ? `<div class="notice bad"><b>This run did not beat chance.</b><br>
-       Top-1 is ${pc(r.top1)} against a ${pc(r.chance)} baseline, which is
-       the same as guessing. It is shown here exactly as it came out of the
-       notebook, because a result that is reported honestly can be fixed and
-       one that is dressed up cannot.</div>`
-    : `<div class="notice good"><b>Top-1 is ${pc(r.top1)} against a
-       ${pc(r.chance)} baseline</b> — ${lift.toFixed(1)}× chance, on speakers
-       the model had never met.</div>`;
+    ? `<div class="notice bad"><b>It is not working yet.</b><br>
+       The app picks the right phrase about ${inHundred} times in every 100,
+       which is what you would get by guessing at random. The number is shown
+       as it came out, because a result reported honestly can be fixed and one
+       that is dressed up cannot.</div>`
+    : `<div class="notice good"><b>The app picks the right phrase about
+       ${inHundred} times in every 100.</b><br>
+       Guessing at random would get it right about ${Math.round(r.chance * 100)}
+       times in 100, so it is roughly ${lift.toFixed(1)} times better than
+       guessing — and that is measured on people it had never seen before.</div>`;
 
   h += `<div class="grid g4" style="margin-top:16px">
     <div class="stat ${r.atChance ? 'bad' : 'good'}">
-      <div class="n">${pc(r.top1)}</div><div class="l">top-1, unseen speakers</div>
-      ${r.top1Std ? `<div class="s">± ${pc(r.top1Std)} across folds</div>` : ''}
+      <div class="n">${pc(r.top1)}</div>
+      <div class="l">right on the first guess</div>
+      <div class="s">about ${inHundred} out of every 100 phrases</div>
     </div>
-    <div class="stat signal"><div class="n">${pc(r.top3)}</div>
-      <div class="l">top-3</div><div class="s">right answer in the first three</div></div>
-    <div class="stat quiet"><div class="n">${pc(r.chance)}</div>
-      <div class="l">chance</div><div class="s">1 in ${PHRASES}</div></div>
-    <div class="stat quiet"><div class="n">${esc(r.folds)}</div>
-      <div class="l">folds</div><div class="s">${esc(r.protocol)}</div></div>
+    <div class="stat signal">
+      <div class="n">${pc(r.top3)}</div>
+      <div class="l">right within its top three guesses</div>
+      <div class="s">about ${inHundred3} out of every 100</div>
+    </div>
+    <div class="stat quiet">
+      <div class="n">${pc(r.chance)}</div>
+      <div class="l">what random guessing would give</div>
+      <div class="s">1 in ${PHRASES}, because there are ${PHRASES} phrases</div>
+    </div>
+    <div class="stat ${r.atChance ? 'bad' : 'signal'}">
+      <div class="n">${lift.toFixed(1)}&times;</div>
+      <div class="l">better than guessing</div>
+      <div class="s">the headline number, in one figure</div>
+    </div>
+  </div>`;
+
+  h += `<div class="panel" style="margin-top:16px">
+    <h3>How this was measured</h3>
+    <p>We split the volunteers into ${esc(r.folds)} groups. Each time, the app
+      was trained on most of the groups and then tested on the people in the
+      group it had never seen. That is the hard version of the test, and the
+      only one that says anything about a new patient: a system tested on
+      people it already knows will always look better than it is.</p>
+    ${r.top1Std ? `<p style="margin:0">It does not do equally well on
+      everybody. Depending on which people were held out, the score moved by
+      about ${pc(r.top1Std)} either side of the average. Some faces are much
+      easier to read than others, which is the gap the personalisation step
+      is meant to close.</p>` : ''}
   </div>`;
 
   if (r.personalisedBest) {
+    const gain = Math.max(0, r.personalisedBest - r.top1);
     h += `<div class="panel" style="margin-top:16px">
-      <h3>Few-shot personalisation</h3>
-      <p>The project's research contribution: what a handful of the user's
-         own recordings is worth, measured on speakers held out of training.</p>
+      <h3>What a few of your own recordings are worth</h3>
+      <p>If the person using the app records
+        ${plural(r.personalisedShots, 'example', 'examples')} of each phrase
+        themselves, the app learns their particular way of making those shapes.
+        This is the part of the project we are putting forward as new.</p>
       <div class="grid g3" style="margin-top:14px">
-        <div class="stat good"><div class="n">${pc(r.personalisedBest)}</div>
-          <div class="l">personalised top-1</div>
-          <div class="s">with ${plural(r.personalisedShots, 'clip', 'clips')} per phrase</div></div>
         <div class="stat quiet"><div class="n">${pc(r.top1)}</div>
-          <div class="l">before personalisation</div></div>
-        <div class="stat signal"><div class="n">+${pc(Math.max(0, r.personalisedBest - r.top1))}</div>
-          <div class="l">gained</div></div>
+          <div class="l">before</div>
+          <div class="s">a model that has never met you</div></div>
+        <div class="stat good"><div class="n">${pc(r.personalisedBest)}</div>
+          <div class="l">after</div>
+          <div class="s">with ${plural(r.personalisedShots, 'recording', 'recordings')} of your own per phrase</div></div>
+        <div class="stat signal"><div class="n">+${pc(gain)}</div>
+          <div class="l">gained</div>
+          <div class="s">what those few recordings bought</div></div>
       </div></div>`;
+  } else {
+    h += `<div class="notice" style="margin-top:16px">
+      <b>The personalisation step has not been measured yet.</b><br>
+      It needs several recordings of the same phrase from the same person,
+      and everyone recorded so far gave one of each. That measurement is the
+      next piece of collection work.</div>`;
   }
 
-  /* corpus the run was trained on */
   if (w.corpus) {
     const c = w.corpus;
-    h += `<div class="panel" style="margin-top:16px"><h3>What it was trained on</h3>
+    h += `<div class="panel" style="margin-top:16px">
+      <h3>What it learned from</h3>
       <div class="grid g4" style="margin-top:14px">
-        <div class="stat quiet"><div class="n">${esc(c.speakers)}</div><div class="l">speakers</div></div>
-        <div class="stat quiet"><div class="n">${esc(c.clips)}</div><div class="l">clips</div></div>
+        <div class="stat quiet"><div class="n">${esc(c.speakers)}</div><div class="l">people recorded</div></div>
+        <div class="stat quiet"><div class="n">${esc(c.clips)}</div><div class="l">recordings</div></div>
         <div class="stat quiet"><div class="n">${esc(c.phrases)}</div><div class="l">phrases</div></div>
         <div class="stat quiet"><div class="n">${esc(c.minutes)}</div><div class="l">minutes of video</div></div>
-      </div></div>`;
+      </div>
+      <p style="margin:14px 0 0;color:var(--ink-3);font-size:.84rem">
+        Forty-one people is a small number for this kind of task, and it is
+        the main reason the score moves as much as it does.</p>
+    </div>`;
   }
 
-  /* the results figures, inline, because this is the section people read */
-  const rf = (DATA.web.figures || []).filter((f) => f.group === 'results');
+  const rf = (w.figures || []).filter((f) => f.group === 'results');
   if (rf.length) {
-    h += `<h3 style="margin:26px 0 14px">Figures from this run</h3><div class="figs">`
-      + rf.map(figCard).join('') + '</div>';
+    h += `<h3 style="margin:26px 0 6px">The charts behind these numbers</h3>
+      <p style="color:var(--ink-2);font-size:.89rem;margin:0 0 14px">
+        Click any chart to see it full size.</p>
+      <div class="figs">${rf.map(figCard).join('')}</div>`;
   }
 
-  set('results', head('Training results',
-    `${esc(r.protocol)} · exported ${esc((w.generatedUtc || '')
-      .replace('T', ' ').replace('Z', ' UTC'))}`) + h);
+  set('results', head('How well it works',
+    `Measured on people the app had never seen. Last updated ${
+      esc((w.generatedUtc || '').replace('T', ' ').replace('Z', ' UTC'))}.`) + h);
 }
 
 /* ============================================================== figures */
@@ -856,4 +925,50 @@ function team() {
       <b>Only the master admin can add or remove people.</b><br>
       That is ${esc(MASTER)}, hard-coded in both the app and this page so
       the project cannot lock its own owner out.</div>`);
+}
+
+
+/* ============================================================== signups */
+function signups() {
+  const rows = DATA.signups;
+  const me = window.__me;
+
+  if (!rows.length) {
+    set('signups', head('Volunteer signups',
+      'People who filled in the form on the public project page.')
+      + (me && (me.role === 'admin' || me.role === 'master')
+        ? empty('Nobody has signed up yet',
+          `<p style="margin:0">The form is at the bottom of the
+           <a href="index.html#volunteer">project page</a>. Registrations
+           appear here as they come in.</p>`)
+        : `<div class="notice"><b>Signups are visible to administrators.</b><br>
+           You are signed in as ${esc(me?.role || '\u2014')}. Ask the master
+           admin if you need access.</div>`));
+    return;
+  }
+
+  const body = rows.map((r) => `<tr class="r-ok">
+    <td><b>${esc(r.name || '\u2014')}</b></td>
+    <td><a href="tel:${esc(String(r.mobile || '').replace(/[^+\d]/g, ''))}">${esc(r.mobile || '\u2014')}</a></td>
+    <td>${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '\u2014'}</td>
+    <td>${esc(r.address || '\u2014')}</td>
+    <td>${esc(r.languages || '\u2014')}</td>
+    <td>${esc(r.availability || '\u2014')}</td>
+    <td class="num">${esc(String(r.createdUtc || '').slice(0, 10))}</td>
+  </tr>`).join('');
+
+  set('signups', head('Volunteer signups',
+    `${plural(rows.length, 'person has', 'people have')} offered to be
+     recorded. These are contact details people gave us in confidence: they
+     are not in any export, and they do not appear anywhere on the public
+     site.`)
+    + `<div class="tbl-wrap"><table>
+        <thead><tr><th>Name</th><th>Mobile</th><th>Email</th><th>Where</th>
+        <th>Languages</th><th>Free when</th><th class="num">Signed up</th></tr></thead>
+        <tbody>${body}</tbody></table></div>
+      <div class="notice" style="margin-top:16px">
+        <b>Before recording anyone from this list:</b> meet them, explain the
+        project, and have them sign the numbered consent form. The form is
+        what the consent rests on \u2014 this list is only how you reach them.
+      </div>`);
 }
