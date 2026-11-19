@@ -1,4 +1,4 @@
-ANTARVANI setup  2026-11-19 16:48:14.919584
+ANTARVANI setup  2026-11-19 19:34:46.449921
 Folder: F:\2026\My_projects\College_project\Silent_voice\silent_voice_recorder
 
 === 1. Project folder ===========================================

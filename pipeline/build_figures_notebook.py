@@ -78,6 +78,11 @@ FACE_SPEAKER = ""
 # How big the speaker grid gets. More is slower - each cell decodes a video.
 GRID_PHRASES  = 5
 GRID_SPEAKERS = 7
+
+# MUST match the CROP_SCALE the model was trained with. The crop cache is
+# keyed on it, so the wrong value here re-crops all 820 clips - half an hour
+# - and then draws figures of a framing the model never saw.
+CROP_SCALE = 0.7
 '''),
 
     md("## 1. Set up"),
@@ -103,7 +108,8 @@ from pathlib import Path
 import antarvani_pipeline as P
 import antarvani_figures as F
 
-cfg = P.Config(lang=LANG, corpus_dir=CORPUS_DIR, work_dir=WORK_DIR)
+cfg = P.Config(lang=LANG, corpus_dir=CORPUS_DIR, work_dir=WORK_DIR,
+               crop_scale=CROP_SCALE)
 root, spec = P.load_language(cfg)          # finds the corpus folder itself
 work = P.resolve_work_dir(cfg, Path(root))
 clips = P.scan(root, spec, cfg)
@@ -219,6 +225,7 @@ else:
         print("or under the chance line. Fix the model before these go in a")
         print("report; the crop figures in section 5 are where to look first.")
     for path in [F.fig_summary(res, clips, spec, FIGS, cfg),
+                 F.fig_training(res, FIGS, cfg),
                  F.fig_folds(res, FIGS, cfg),
                  F.fig_confusion(res, spec, FIGS, cfg),
                  F.fig_per_phrase(res, spec, FIGS, cfg),

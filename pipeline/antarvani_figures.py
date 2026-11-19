@@ -753,6 +753,62 @@ def fig_folds(res: dict, out: Path, cfg: Config | None = None) -> Path:
     return save(fig, "fig12_folds", out, cfg)
 
 
+def fig_training(res: dict, out: Path, cfg: Config | None = None) -> Path:
+    """Loss and training accuracy over the epochs, one line per fold.
+
+    The figure that settles the argument. If these curves climb to the top
+    and the held-out bar stays at chance, the model learned the training
+    speakers and nothing general — overfitting. If they never leave chance,
+    nothing was learned at all and the fault is upstream of the model. A
+    reader can see which in one glance, which is why it belongs in the
+    paper rather than only in a log.
+    """
+    plt = style()
+    cv = res.get("crossValidation", {})
+    hists = [h for h in (cv.get("foldHistory") or []) if h.get("accuracy")]
+    if not hists:
+        return Path()
+    chance = 100 * cv.get("chance", 0.05)
+    held = 100 * cv.get("top1", 0)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.6, 4.4))
+    for i, h in enumerate(hists):
+        ep = np.arange(1, len(h["accuracy"]) + 1)
+        shade = SEQ[min(2 + i, len(SEQ) - 1)]
+        axes[0].plot(ep, h.get("loss", []), color=shade, lw=2,
+                     label=f"fold {i + 1}")
+        axes[1].plot(ep, [100 * a for a in h["accuracy"]], color=shade, lw=2,
+                     label=f"fold {i + 1}")
+
+    axes[0].set_ylabel("training loss")
+    axes[1].set_ylabel("training accuracy (%)")
+    axes[1].axhline(chance, color=INK, ls="--", lw=1.3)
+    axes[1].text(1, chance, f" chance {chance:.0f}%", va="top", fontsize=10)
+    # When the model is at chance the two lines coincide and their labels
+    # print on top of each other, which is the one case where this figure
+    # most needs to be readable.
+    if abs(held - chance) > 0.5:
+        axes[1].axhline(held, color=GOOD, lw=1.8)
+        axes[1].text(1, held, f" held-out speakers {held:.1f}%", va="bottom",
+                     fontsize=10, color=GOOD, fontweight="bold")
+    else:
+        axes[1].text(0.99, 0.04,
+                     f"held-out speakers {held:.1f}% — at chance",
+                     transform=axes[1].transAxes, ha="right", fontsize=10.5,
+                     color=BAD, fontweight="bold")
+    for a in axes:
+        a.set_xlabel("epoch")
+        a.yaxis.grid(True, color=GRID, lw=0.8)
+        a.set_axisbelow(True)
+    if len(hists) > 1:
+        axes[1].legend(ncol=min(len(hists), 5), fontsize=9.5)
+
+    fig.suptitle("Training curves, fold by fold", x=0.009, y=1.02, ha="left",
+                 fontsize=14, fontweight="bold")
+    fig.tight_layout()
+    return save(fig, "fig16_training", out, cfg)
+
+
 def fig_personalisation(res: dict, out: Path,
                         cfg: Config | None = None) -> Path:
     """The project's own contribution: what a handful of the user's own
@@ -875,6 +931,10 @@ WEB_FIGURES = [
     ("fig14_speakers.png", "results", False, "Accuracy per held-out speaker",
      "Some faces are much easier than others - the gap personalisation is "
      "meant to close."),
+    ("fig16_training.png", "results", True, "Training curves",
+     "Training loss and accuracy per epoch, with the held-out result marked. "
+     "Curves that climb while the held-out line stays low mean overfitting; "
+     "curves that never leave chance mean nothing was learned."),
     ("fig13_personalisation.png", "results", True, "Few-shot personalisation",
      "What a handful of the user's own recordings is worth."),
 ]

@@ -2,7 +2,158 @@
 
 Zip files are numbered: `ANTARVANI_app_v01.zip`, `v02`, `v03` … Always use the
 highest number. (This is the delivery number, not the app's `version:` in
-pubspec.yaml, which stays 1.0.0+1 until you decide to change it.)
+pubspec.yaml, which stays 1.0.0+3 until you decide to change it.)
+
+## v45 — 19 Nov 2026
+
+The app and the website disagreed about which sessions were finished, and
+the website was the one telling the truth badly.
+
+**Tier A expects 1 take per phrase, not 2.** `SpeakerMeta.toMap` wrote
+`targetClips: kPhrases.length * (tier == 'A' ? 2 : 10)` — 40 for every Tier
+A speaker — while `Tier.a.takes` has always been 1 and the app's own
+dashboard recomputes from it and shows 20. Firestore has been carrying 40
+for every speaker recorded so far. The phone looked right because it
+ignored its own stored field; the website read the field and showed
+"20 of 40 · 20 left · 36 unfinished" for a corpus that is complete. One
+field cannot have two answers: `toMap` now uses `Tier.takes`, the same
+definition the rest of the app uses.
+
+Speaker rows already in Firestore keep the old 40. Nothing reads it now —
+both the app and the website compute the target from the tier — so there is
+nothing to migrate.
+
+**The website's Rejected chip swaps the list instead of adding to it**,
+which is what `_SpeakersTab` does on the phone: rejected sessions stay out
+of the list the way they stay out of the totals, and the chip is how you go
+and look at them. It used to show the rejected rows mixed in with all the
+others, so turning it on appeared to do nothing.
+
+**Recordings can be played from the dashboard.** Each speaker row has a
+Clips button that opens that speaker's twenty phrases, in Devanagari with
+the English beneath, each with a Play button. The clip streams from Drive's
+own preview, so Drive applies its sharing rules — a team member with access
+to the corpus folder sees the recording, anyone else gets Drive's refusal.
+No copy is made and no clip is served from the website. Lost and thrown-out
+clips appear in the panel too, marked as such, because those are the ones
+somebody usually wants to look at.
+
+**The header's weather is Panvel**, not Mumbai. Three values at the top of
+`chrome.js` move it.
+
+## v44 — 19 Nov 2026
+
+Two runs have now been lost to faults that looked identical from the
+training log — a loss sitting at ln(20) for an hour — and that a
+thirty-second look at the data would have caught. So nothing trains any
+more until the data has been looked at, measured, and shown to be
+learnable.
+
+**A new section 6 in the training notebook: see the data first.** For four
+clips it shows the cached crop on top and the *same clip after
+augmentation* underneath, with a motion figure under each strip. Showing
+only the cached crop is exactly how an augmentation that replaced every
+clip with a still frame survived a day of looking at crop pictures that
+were perfectly fine.
+
+**Pre-flight checks, before the GPU does real work.** They stop the run
+with the reason rather than letting it burn an hour to arrive at chance:
+
+* pixel range, per-clip spread, motion, class balance, speaker count —
+  printed every run
+* a blank cache, or clips whose frames are literally identical
+* **augmentation that removes movement the cached clips had** — the exact
+  fault from this morning, measured before and after
+* a **memorisation test**: can the model overfit two clips per class? It
+  runs twice, with augmentation and without, because which of the two
+  fails says where to look. Fails both → the signal is not in the clips.
+  Fails only with augmentation → the augmentation is too strong for a
+  corpus this size.
+
+No guessed thresholds. An earlier draft of this failed healthy data
+because I picked a "minimum motion" number out of the air; the checks
+that can fail now are the ones with no free parameter, and the real gate
+is the memorisation test, which is empirical.
+
+**Auto-stop during training.** Both rules read **training** accuracy only
+— stopping on the held-out speakers would quietly turn cross-validation
+into a score that has seen its own test set.
+
+* `STALL_STOP` (15): a fold still at chance after this many epochs aborts
+  the whole run. Four more folds arriving at 5.0% teach nothing the
+  fifteenth epoch had not already said.
+* `PATIENCE` (6): a fold stops once training accuracy has saturated, so
+  `EPOCHS` is a ceiling rather than a fixed cost. It only triggers above
+  97%, because stopping earlier would also cut the cosine learning-rate
+  schedule short and leave a worse model.
+
+**`AUGMENT`** can now be turned off, for when the smoke test says the
+augmentation is what is blocking learning.
+
+Measured, not assumed: this model reaches ~52% memorising 60 clips of
+twenty cleanly separable classes, so the pass mark is five times chance.
+
+## v43 — 19 Nov 2026
+
+**Found it. The model was being trained on still images.**
+
+`_augment` cropped each clip with `tf.image.crop_and_resize`, and passed
+`box_indices = tf.zeros([48])`. That argument says which frame each box is
+cut from — all zeros meant all 48 boxes were cut out of **frame 0**. Every
+augmented clip became 48 copies of its own first frame: a face at rest,
+before the person had started mouthing anything.
+
+So every class looked identical, and the model sat at exactly chance on its
+own training data. That is what `(train 5.0%)` meant, and why more speakers
+never helped — 15 speakers and 41 speakers of still images are equally
+unlearnable.
+
+One word: `tf.range(FRAMES)` instead of `tf.zeros([FRAMES])`. Box *i*
+belongs to frame *i*.
+
+Proven both ways before and after. On a task that is purely temporal — a
+block that brightens versus one that darkens, identical in every single
+frame taken alone — the old code could not beat chance and the fixed code
+reaches 100% training accuracy in six epochs.
+
+**`TRAIN_REV` now goes into the resume signature.** Folds saved by the
+broken pipeline look finished and are worthless; without this, a re-run
+would have loaded them straight back and reported 5.0% again. Raise it
+whenever a change alters what the model is trained on and every account
+starts clean.
+
+## v42 — 19 Nov 2026
+
+**Training was running with `verbose=0`.** Forty minutes of silence between
+"cross-validation, 5 folds x 60 epochs" and the result. Every epoch now
+prints one line:
+
+```
+    fold 2/5 epoch  34/60   loss 1.842   train acc  61.3%     92s gone, ~ 70s left
+```
+
+One line per epoch rather than Keras's per-batch progress bar, which in
+Colab means hundreds of redrawn lines and a notebook nobody wants to scroll
+back through. `LOG_EVERY` in the settings cell takes 5 for every fifth epoch
+or 0 for silence; the first and last epoch of a fold always print.
+
+**The training history was being thrown away.** `fit` kept only the final
+epoch's accuracy, so no training curve could ever be drawn. The whole
+history per fold is now saved into `results.json`, and there is a figure
+for it — loss and training accuracy per epoch with the held-out result
+marked on the same axes. That figure settles the question the last run
+left open: curves that climb while the held-out line stays flat mean
+overfitting; curves that never leave chance mean nothing was learned and
+the fault is upstream of the model.
+
+**And the run now says which it is**, in words, at the end of
+cross-validation:
+
+```
+  train 96.4%   vs   held-out 12.1%   (chance 5.0%)
+  -> it learned the training speakers and none of the held-out ones:
+     overfitting. More speakers, more augmentation, or a smaller model.
+```
 
 ## v41 — 19 Nov 2026
 

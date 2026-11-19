@@ -77,7 +77,13 @@ class SpeakerMeta {
         'clipMillis': RecSpec.clipMillis,
         'audioRecorded': RecSpec.recordAudio,
         'sessionStartUtc': sessionStartUtc,
-        'targetClips': kPhrases.length * (tier == 'A' ? 2 : 10),
+        // Tier.takes is the one definition of how many takes a tier expects:
+        // A is 1, B is 10. This line used to say `tier == 'A' ? 2 : 10` and
+        // wrote 40 into Firestore for every Tier A speaker, who then showed
+        // as "20 of 40, 20 left" on any screen that trusted the stored
+        // number — while the app's own dashboard recomputed it and said
+        // complete. Two answers from one field is worse than either.
+        'targetClips': kPhrases.length * (tier == 'B' ? Tier.b.takes : Tier.a.takes),
       };
 
   /// Rebuilds the form from a Firestore row, for editing a speaker or

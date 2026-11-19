@@ -38,7 +38,19 @@ TARGET_FPS = 16.0
 WINDOW_S = 3.0
 FRAMES = int(round(TARGET_FPS * WINDOW_S))  # 48
 CROP = 88
-EYE_BOX_SCALE = 1.6          # crop side = outer-eye-corner distance x this
+# Crop side, as a multiple of the distance between the outer eye corners,
+# centred on the mouth.
+#
+# This was 1.6, which put the eyes inside the frame: a face crop, not a
+# mouth crop. Two things were wrong with that. The lips were about 30x18
+# pixels of the 88x88, so most of the resolution went on cheeks; and with
+# eyes and face shape in view the network can tell WHO is speaking, which
+# is the one shortcut that cannot survive leave-speakers-out - it learns
+# the speaker instead of the phrase.
+#
+# 0.9 frames the mouth from nose-base to chin. The lips take roughly three
+# times the area, and there is nothing in frame that identifies a person.
+EYE_BOX_SCALE = 0.9
 EMB_DIM = 192
 VIDEO_EXT = {".mp4", ".mov", ".3gp", ".mkv", ".avi", ".webm"}
 
@@ -95,6 +107,22 @@ class Config:
     checkpoint: bool = True        # save inside a fold, so a GPU cut-off
                                    # costs an epoch instead of a fold
     allow_cpu: bool = False        # refuse to train without a GPU
+    log_every: int = 1             # epochs between progress lines; 0 is off,
+                                   # 5 is every fifth. First and last always
+                                   # print.
+    smoke_test: bool = True        # before training, prove the model can
+                                   # memorise a few clips
+    stall_epochs: int = 15         # give up on a fold still at chance after
+                                   # this many epochs. 0 never gives up.
+    patience: int = 6              # stop a fold once training accuracy has
+                                   # saturated for this many epochs. 0 runs
+                                   # every epoch.
+    augment: bool = True           # random zoom, shift, mirror, lighting and
+                                   # time-slide. Off only for diagnosis.
+    crop_scale: float = EYE_BOX_SCALE   # how tight the mouth crop is. The
+                                   # cache key includes it, so changing it
+                                   # re-crops rather than silently reusing
+                                   # the old frames.
     account: str = ""              # which Google account is running this
     github_repo: str = ""          # "user/repo" - '' = do not upload
     github_token: str = ""
@@ -455,8 +483,12 @@ def scan(root: str, spec: dict, cfg: Config) -> list[dict]:
             clips.append({
                 "path": str(f), "name": f.name, "phrase": pid,
                 "label": idx - 1, "speaker": speaker, "take": take,
-                "key": hashlib.md5(f"{pid}/{f.name}/{st.st_size}".encode())
-                .hexdigest()[:16],
+                # The geometry is part of the identity of a cached crop.
+                # Without it, changing the crop scale would reuse frames cut
+                # to the old one and the change would appear to do nothing.
+                "key": hashlib.md5(
+                    f"{pid}/{f.name}/{st.st_size}/{CROP}/{cfg.crop_scale:.3f}"
+                    .encode()).hexdigest()[:16],
             })
     if odd:
         cfg.say(f"note: {len(odd)} file(s) are not named by the app "
@@ -765,7 +797,7 @@ class LipCropper:
         return (res.multi_face_landmarks[0].landmark
                 if res.multi_face_landmarks else None)
 
-    def crop(self, bgr):
+    def crop(self, bgr, box_scale: float = EYE_BOX_SCALE):
         import cv2
         h, w = bgr.shape[:2]
         lm = self._landmarks(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
@@ -779,7 +811,7 @@ class LipCropper:
         mouth = (pt(LIP_CORNERS[0]) + pt(LIP_CORNERS[1])) / 2.0
         d = eye_r - eye_l
         angle = float(np.degrees(np.arctan2(d[1], d[0])))
-        box = (float(np.linalg.norm(d)) or 1.0) * EYE_BOX_SCALE
+        box = (float(np.linalg.norm(d)) or 1.0) * box_scale
         M = cv2.getRotationMatrix2D((float(mouth[0]), float(mouth[1])),
                                     angle, CROP / box)
         M[0, 2] += CROP / 2 - mouth[0]
@@ -797,7 +829,8 @@ def sample_indices(n_frames: int, src_fps: float) -> list[int]:
             for i in range(FRAMES)]
 
 
-def process_clip(path: str, cropper: LipCropper):
+def process_clip(path: str, cropper: LipCropper,
+                 box_scale: float = EYE_BOX_SCALE):
     import cv2
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
@@ -819,7 +852,7 @@ def process_clip(path: str, cropper: LipCropper):
     crops, hits, seen = [], 0, {}
     for i in sample_indices(len(frames), fps):
         if i not in seen:
-            seen[i] = cropper.crop(frames[i])
+            seen[i] = cropper.crop(frames[i], box_scale)
         c = seen[i]
         if c is not None:
             hits += 1
@@ -845,7 +878,7 @@ def preprocess(clips: list[dict], cache_dir: str, cfg: Config) -> list[dict]:
     if todo:
         cropper = LipCropper(str(Path(cache_dir).parent))
         for n, c in enumerate(todo, 1):
-            arr, err = process_clip(c["path"], cropper)
+            arr, err = process_clip(c["path"], cropper, cfg.crop_scale)
             if err:
                 bad[c["key"]] = {"name": c["name"], "why": err}
                 cfg.say(f"  skip {c['phrase']}/{c['name']}: {err}")
@@ -866,7 +899,7 @@ def preprocess(clips: list[dict], cache_dir: str, cfg: Config) -> list[dict]:
         cropper = LipCropper(str(Path(cache_dir).parent))
         for c in broken:
             (cache / f"{c['key']}.npz").unlink(missing_ok=True)
-            arr, err = process_clip(c["path"], cropper)
+            arr, err = process_clip(c["path"], cropper, cfg.crop_scale)
             if err:
                 bad[c["key"]] = {"name": c["name"], "why": err}
             else:
@@ -880,6 +913,369 @@ def preprocess(clips: list[dict], cache_dir: str, cfg: Config) -> list[dict]:
         cfg.say(f"{len(skipped)} clip(s) unusable (no face / too short). "
                 "Reject them in the app so they stop counting.")
     return good
+
+
+# --------------------------------------------- 3b. look before you train
+#
+# Two runs were lost to faults that a thirty-second look at the data would
+# have caught: an augmentation that replaced every clip with 48 copies of
+# its first frame, and before that a face detector that never ran. Both
+# produced the same thing on screen - a loss sitting at ln(n_classes) for
+# an hour - and neither was visible from the training log.
+#
+# So nothing trains now until the data has been looked at, measured, and
+# shown to be learnable. The checks below are cheap, they run before the
+# GPU does any real work, and each one stops the run with the reason
+# rather than letting it burn an hour to arrive at chance.
+
+# A clip whose frames are literally identical has motion 0.00. Anything
+# above this is real movement, however small. An absolute "healthy" level
+# is NOT set here on purpose: how much a mouth crop changes between frames
+# depends on the crop size, the frame rate and the speaker, and a number
+# guessed here would eventually stop a perfectly good corpus. The checks
+# that can fail are the ones with no free parameter - identical frames,
+# a blank cache, augmentation that removes movement that was there, and a
+# model that cannot memorise forty clips.
+STILL_EPS = 0.02      # below this a clip is frozen, not merely calm
+FLAT_CLIP_MAX = 0.10  # share of frozen clips tolerated
+
+
+class PreflightError(RuntimeError):
+    """The data cannot be learned from. Raised before training starts."""
+
+
+def clip_motion(X: np.ndarray) -> np.ndarray:
+    """Mean frame-to-frame change per clip, on the 0-255 scale.
+
+    This is the number that matters for lip reading: a clip with no motion
+    carries no phrase, however sharp each individual frame looks.
+    """
+    return np.abs(np.diff(X.astype(np.int16), axis=1)).mean(axis=(1, 2, 3))
+
+
+def check_data(X, y, g, n_classes: int, cfg: Config) -> dict:
+    """What is actually in the cache, and whether it could teach anything."""
+    motion = clip_motion(X)
+    flat = int((motion < STILL_EPS).sum())
+    per_clip_std = X.reshape(len(X), -1).std(axis=1)
+    counts = np.bincount(y, minlength=n_classes)
+
+    cfg.say("")
+    cfg.say("data going into training")
+    cfg.say(f"  shape        {X.shape}  {X.dtype}")
+    cfg.say(f"  pixel range  {X.min()}-{X.max()}   mean {X.mean():.1f}")
+    cfg.say(f"  per-clip std {per_clip_std.min():.1f} to "
+            f"{per_clip_std.max():.1f}  (0 means a blank clip)")
+    cfg.say(f"  motion       {motion.min():.2f} to {motion.max():.2f}, "
+            f"median {np.median(motion):.2f}")
+    cfg.say(f"  frozen clips {flat} of {len(X)} (identical frames)")
+    cfg.say(f"  classes      {counts.min()} to {counts.max()} clips each")
+    cfg.say(f"  speakers     {len(set(g.tolist()))}")
+
+    if X.max() == X.min():
+        raise PreflightError("every pixel of every clip is the same value - "
+                             "the cache is blank. Delete the cache folder "
+                             "and let it rebuild.")
+    if flat > FLAT_CLIP_MAX * len(X):
+        raise PreflightError(
+            f"{flat} of {len(X)} clips are frozen - every frame identical "
+            f"({100 * flat / len(X):.0f}%). A still clip carries no phrase. "
+            "Either the face detector locked onto something that is not a "
+            "mouth, or the cache was written by a broken run: delete "
+            "<work>/cache/<lang> and let it rebuild.")
+    if counts.min() == 0:
+        missing = [i for i, c in enumerate(counts) if c == 0]
+        raise PreflightError(f"no clips at all for class(es) {missing}")
+
+    return {"motion": float(np.median(motion)), "stillClips": flat,
+            "pixelMin": int(X.min()), "pixelMax": int(X.max())}
+
+
+def check_augmentation(X, n_classes: int, cfg: Config) -> None:
+    """Does a clip still move after augmentation?
+
+    The exact fault that cost a day: crop_and_resize was cutting all 48
+    boxes out of frame 0, so every augmented clip was a still picture
+    while the cached data it came from was perfectly fine. Measuring
+    motion before and against after is the one check that sees it.
+    """
+    import tensorflow as tf
+
+    fn = _augment(n_classes)
+    take = min(8, len(X))
+    before, after = [], []
+    for i in np.linspace(0, len(X) - 1, take, dtype=int):
+        raw = X[i]
+        aug = fn(tf.constant(raw), tf.constant(np.int32(0)))[0].numpy()
+        before.append(clip_motion(raw[None])[0])
+        after.append(clip_motion((aug[..., 0] * 255).astype(np.uint8)[None])[0])
+
+    b, a = float(np.mean(before)), float(np.mean(after))
+    cfg.say(f"  augmentation motion {b:.2f} before -> {a:.2f} after")
+    if b > STILL_EPS and a < 0.5 * b:
+        raise PreflightError(
+            f"augmentation is destroying the movement in the clips "
+            f"(motion {b:.2f} -> {a:.2f}). The model would be trained on "
+            "stills. Check _augment before going further.")
+
+
+def can_it_learn(X, y, n_classes: int, cfg: Config,
+                 per_class: int = 2, epochs: int = 150) -> float:
+    """Is the model moving at all on a handful of clips?
+
+    This test exists to catch one failure, the one that actually
+    happened: every fold pinned at a loss of exactly ln(n_classes) for
+    sixty epochs, because the augmentation was handing the model 48
+    copies of frame 0 and every class looked identical. That signature is
+    unmistakable - nothing moves, ever - and it costs two minutes to find
+    instead of an hour.
+
+    It is NOT a measure of how well the model will do. An earlier version
+    judged a fixed accuracy at epoch 25, which on 40 clips at batch 16 is
+    75 gradient updates: far too few for a 1.77 M parameter network to
+    memorise twenty classes, so it failed healthy data. The real run gets
+    twenty times as many updates. The lesson: give the test enough steps
+    to be meaningful, then judge movement rather than a threshold, and
+    when it is unsure let the full run proceed - a false alarm costs a
+    whole GPU session, a slow learner costs nothing but the hour you were
+    going to spend anyway.
+
+    Returns the best training accuracy seen, or nan if skipped.
+    """
+    idx = []
+    for c in range(n_classes):
+        have = np.where(y == c)[0]
+        idx.extend(have[:per_class].tolist())
+    idx = np.array(idx)
+    if len(idx) < n_classes:
+        cfg.say("  (too few clips for the memorisation test; skipped)")
+        return float("nan")
+
+    chance = 1.0 / n_classes
+    uniform = float(np.log(n_classes))   # loss of a model that knows nothing
+
+    # Small batches on purpose: 40 clips at batch 8 is 5 updates an epoch,
+    # so 150 epochs is 750 - enough that reaching chance means something.
+    steps = int(np.ceil(len(idx) / 8)) * epochs
+    cfg.say("")
+    cfg.say(f"movement test: {len(idx)} clips, {epochs} epochs, "
+            f"{steps} gradient updates")
+    cfg.say(f"  looking for any movement off chance ({chance:.1%}) and below "
+            f"a loss of {uniform:.3f}")
+
+    def run(augment: bool, tag: str) -> tuple[float, float]:
+        quiet = Config(**{**cfg.__dict__, "epochs": epochs, "batch": 8,
+                          "checkpoint": False, "augment": augment,
+                          "stall_epochs": 0, "patience": 0,
+                          "log_every": max(10, epochs // 5)})
+        quiet.say = cfg.say
+        _, _, hist = fit(X[idx], y[idx], n_classes, quiet, seed=cfg.seed,
+                         label=f"  {tag}")
+        acc = max(hist.get("accuracy", [0.0]))
+        loss = min(hist.get("loss", [uniform * 2]))
+        return float(acc), float(loss)
+
+    plain_acc, plain_loss = run(False, "plain   ")
+    cfg.say(f"  without augmentation: best acc {plain_acc:.1%}, "
+            f"best loss {plain_loss:.3f}")
+
+    # Run the augmented pass for information only. On 40 clips every epoch
+    # is a fresh view, so this is a far harder task than the real run and
+    # a low number here means nothing - it is printed, never judged.
+    if cfg.augment:
+        aug_acc, aug_loss = run(True, "augmented")
+        cfg.say(f"  with augmentation:    best acc {aug_acc:.1%}, "
+                f"best loss {aug_loss:.3f}   (for information only)")
+    else:
+        aug_acc, aug_loss = plain_acc, plain_loss
+
+    # Dead means dead: the loss never got under the value a model that
+    # outputs a flat distribution would score, AND accuracy never left
+    # chance. Both, because either alone is noise on a sample this small.
+    #
+    # Two tolerances, neither of them guessed. The loss one is numerical:
+    # when every input is identical the best the model can do is output
+    # the class prior, which scores exactly ln(n_classes), and the broken
+    # run sat at 2.9957 against ln(20) = 2.99573 - inside floating-point
+    # noise of the bound, so a bare `< uniform` would have waved it
+    # through. One per cent of the bound is wider than that noise and far
+    # narrower than real learning. The accuracy one comes from the sample
+    # size: on these clips a single extra correct clip moves accuracy by
+    # 1/len(idx), so anything smaller is one clip of luck, not learning.
+    moved_loss = plain_loss < uniform * 0.99
+    moved_acc = plain_acc > chance + 1.0 / len(idx)
+    if not moved_loss and not moved_acc:
+        raise PreflightError(
+            f"after {steps} gradient updates on {len(idx)} clips the model "
+            f"has not moved at all: best loss {plain_loss:.3f} against "
+            f"{uniform:.3f} for a model that knows nothing, best accuracy "
+            f"{plain_acc:.1%} against {chance:.1%} for a coin flip. It "
+            "cannot fit data it has already seen, so the signal is not in "
+            "the clips: either the crops are not showing the mouth, or the "
+            "cache was written by a broken run. Look at the preview "
+            "figure, and if the crops look wrong delete "
+            "<work>/cache/<lang> and let it rebuild.")
+
+    if plain_acc < 3 * chance:
+        cfg.say("")
+        cfg.say(f"  note: only {plain_acc:.1%} on {len(idx)} clips - early on "
+                "the curve, not stuck.")
+        cfg.say(f"  The loss is moving ({uniform:.3f} -> {plain_loss:.3f}) "
+                "and the full run gets")
+        cfg.say(f"  far more updates than this test, so training goes ahead.")
+    return float(aug_acc)
+
+
+def preflight(X, y, g, n_classes: int, cfg: Config) -> dict:
+    """Every check, in the order that fails cheapest first."""
+    report = check_data(X, y, g, n_classes, cfg)
+    check_augmentation(X, n_classes, cfg)
+    if cfg.smoke_test:
+        report["memorised"] = can_it_learn(X, y, n_classes, cfg)
+    cfg.say("")
+    cfg.say("preflight passed - the data moves, the augmentation keeps the")
+    cfg.say("movement, and the model is learning rather than stuck.")
+    return report
+
+
+def choose_crop(clips: list[dict], spec: dict, cfg: Config,
+                scales=(0.7, 0.9, 1.1, 1.3, 1.6), n_clips: int = 3,
+                strip_at: float = 0.9):
+    """The same clips cropped at several scales, side by side, to pick from.
+
+    Cropping all eight hundred clips to find out the framing was wrong
+    costs twenty-five minutes. Cropping three costs twenty seconds, and
+    the right scale is something you can see and cannot usefully compute:
+    it depends on how close these volunteers sat to the camera.
+
+    Writes nothing to the cache - this is only a picture.
+    """
+    import cv2
+    import matplotlib.pyplot as plt
+
+    # different speakers, so a single oddly-framed person cannot decide it
+    seen_speakers, chosen = set(), []
+    for c in clips:
+        if c["speaker"] in seen_speakers:
+            continue
+        seen_speakers.add(c["speaker"])
+        chosen.append(c)
+        if len(chosen) == n_clips:
+            break
+    if not chosen:
+        raise SystemExit("No clips to look at.")
+
+    cropper = LipCropper()
+    rows = []
+    for c in chosen:
+        cap = cv2.VideoCapture(c["path"])
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        if not 5 <= fps <= 240:
+            fps = 30.0
+        frames = []
+        while True:
+            ok, f = cap.read()
+            if not ok:
+                break
+            frames.append(f)
+        cap.release()
+        if not frames:
+            continue
+        idx = sample_indices(len(frames), fps)
+        mid = frames[idx[len(idx) // 2]]
+        rows.append((c, mid, frames, idx))
+
+    if not rows:
+        raise SystemExit("Could not read any of the clips.")
+
+    fig, axes = plt.subplots(len(rows), len(scales),
+                             figsize=(1.7 * len(scales), 1.85 * len(rows)))
+    axes = np.atleast_2d(axes)
+    for r, (c, mid, _, _) in enumerate(rows):
+        for k, sc in enumerate(scales):
+            ax = axes[r, k]
+            out = cropper.crop(mid, sc)
+            if out is not None:
+                ax.imshow(out, cmap="gray", vmin=0, vmax=255)
+            else:
+                ax.text(0.5, 0.5, "no face", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=8)
+            ax.set_xticks([]); ax.set_yticks([])
+            if r == 0:
+                ax.set_title(f"{sc:g}", fontsize=12, fontweight="bold")
+            if k == 0:
+                ax.set_ylabel(f"{c['speaker']}\n{c['phrase']}", fontsize=8,
+                              rotation=0, ha="right", va="center", labelpad=22)
+    fig.suptitle("CROP_SCALE - pick the one where the mouth fills the square",
+                 fontsize=12, y=1.0)
+    fig.tight_layout()
+    plt.show()
+
+    # and one full strip at the suggested scale, so motion is visible too
+    c, _, frames, idx = rows[0]
+    steps = np.linspace(0, len(idx) - 1, 12).astype(int)
+    fig2, axs = plt.subplots(1, 12, figsize=(12.6, 1.5))
+    for j, t in enumerate(steps):
+        out = cropper.crop(frames[idx[t]], strip_at)
+        if out is not None:
+            axs[j].imshow(out, cmap="gray", vmin=0, vmax=255)
+        axs[j].set_xticks([]); axs[j].set_yticks([])
+    fig2.suptitle(f"{c['speaker']} {c['phrase']} across the three seconds, "
+                  f"at CROP_SCALE = {strip_at:g}", fontsize=11, y=1.06)
+    fig2.tight_layout()
+    plt.show()
+    return [c["speaker"] for c, _, _, _ in rows]
+
+
+def preview_frames(X, y, spec: dict, n_clips: int = 4, n_frames: int = 12,
+                   seed: int = 0):
+    """Shows what the model is about to be trained on, twice over.
+
+    The top strip of each pair is the cached crop; the bottom is the same
+    clip after augmentation, which is what actually reaches the network.
+    Showing only one of the two is how an augmentation that replaced every
+    clip with a still frame survived a whole day of looking at crop
+    pictures that were perfectly fine.
+
+    Returns the figure so a notebook can display it inline.
+    """
+    import matplotlib.pyplot as plt
+    import tensorflow as tf
+
+    rng = np.random.RandomState(seed)
+    pick = rng.choice(len(X), size=min(n_clips, len(X)), replace=False)
+    fn = _augment(len(spec["phrases"]))
+    steps = np.linspace(0, FRAMES - 1, n_frames, dtype=int)
+
+    rows = 2 * len(pick)
+    fig, axes = plt.subplots(rows, n_frames,
+                             figsize=(1.05 * n_frames, 1.12 * rows))
+    axes = np.atleast_2d(axes)
+
+    for r, i in enumerate(pick):
+        raw = X[i]
+        aug = fn(tf.constant(raw), tf.constant(np.int32(y[i])))[0].numpy()
+        aug = (aug[..., 0] * 255).astype(np.uint8)
+        pid = spec["phrases"][int(y[i])]["id"]
+        for band, (strip, tag) in enumerate(
+                ((raw, f"{pid} cached"), (aug, f"{pid} augmented"))):
+            for c, t in enumerate(steps):
+                ax = axes[2 * r + band, c]
+                ax.imshow(strip[t], cmap="gray", vmin=0, vmax=255)
+                ax.set_xticks([]); ax.set_yticks([])
+                for sp in ax.spines.values():
+                    sp.set_color("#cccccc")
+                if c == 0:
+                    ax.set_ylabel(tag, fontsize=8, rotation=0, ha="right",
+                                  va="center", labelpad=38)
+            m = clip_motion(strip[None])[0]
+            axes[2 * r + band, -1].set_xlabel(f"motion {m:.1f}", fontsize=7)
+
+    fig.suptitle("What the model is fed - cached crop above, augmented "
+                 "below.\nIf the augmented row is a still picture, stop.",
+                 fontsize=11, y=1.0)
+    fig.tight_layout()
+    return fig
 
 
 def load_arrays(clips: list[dict], cache_dir: str):
@@ -929,9 +1325,15 @@ def _augment(n_classes: int):
         cx = 0.5 + tf.random.uniform([], -0.07, 0.07)
         cy = 0.5 + tf.random.uniform([], -0.07, 0.07)
         box = tf.stack([cy - s / 2, cx - s / 2, cy + s / 2, cx + s / 2])
+        # box_indices says WHICH frame each box is cut from. Passing zeros
+        # cut all 48 boxes out of frame 0, so every augmented clip became
+        # 48 copies of its own first frame — a still face, before the
+        # person had started mouthing anything. Every class looked the
+        # same, and the model sat at chance on its own training data.
+        # tf.range is the whole point: box i belongs to frame i.
         x = tf.image.crop_and_resize(
             x, tf.tile(box[None], [FRAMES, 1]),
-            tf.zeros([FRAMES], tf.int32), [CROP, CROP])
+            tf.range(FRAMES), [CROP, CROP])
         if tf.random.uniform([]) < 0.5:                       # mirrored camera
             x = tf.reverse(x, axis=[2])
         # lighting
@@ -946,12 +1348,128 @@ def _augment(n_classes: int):
     return fn
 
 
+def _plain(n_classes: int):
+    """Normalise and one-hot, and nothing else."""
+    import tensorflow as tf
+
+    def fn(x, y):
+        return (tf.cast(x, tf.float32) / 255.0)[..., None], \
+            tf.one_hot(y, n_classes)
+    return fn
+
+
 def _prep(x):
     return (x.astype(np.float32) / 255.0)[..., None]
 
 
+class EpochLog:
+    """One line per epoch, with an estimate of how much longer the fold has.
+
+    Keras's own verbose=1 writes a progress bar per batch, which in Colab
+    means hundreds of redrawn lines and a notebook that is unpleasant to
+    scroll back through afterwards. verbose=2 is one line per epoch but
+    says nothing about which fold it is in or how long is left, and the
+    numbers it prints are the ones somebody watching a 40-minute run
+    actually wants.
+
+    The loss and accuracy here are on the TRAINING data, by definition: the
+    held-out speakers are not touched until the fold is over. Training
+    accuracy climbing while the fold's top-1 stays at chance is the
+    signature of overfitting; training accuracy that never leaves chance
+    means the model is not learning at all. Those are different problems,
+    and this is the line that tells them apart.
+    """
+
+    def __init__(self, cfg, label: str, epochs: int):
+        self.cfg, self.label, self.epochs = cfg, label, epochs
+        self.t0 = None
+
+    def make(self):
+        import tensorflow as tf
+
+        outer = self
+
+        class _Cb(tf.keras.callbacks.Callback):
+            def on_train_begin(self, logs=None):
+                outer.t0 = time.time()
+
+            def on_epoch_end(self, epoch, logs=None):
+                every = max(0, int(outer.cfg.log_every))
+                n = epoch + 1
+                if not every:
+                    return
+                # Always show the first and the last, whatever the interval.
+                if n != 1 and n != outer.epochs and n % every:
+                    return
+                logs = logs or {}
+                gone = time.time() - (outer.t0 or time.time())
+                left = gone / n * (outer.epochs - n)
+                outer.cfg.say(
+                    f"    {outer.label} epoch {n:>3}/{outer.epochs}"
+                    f"   loss {logs.get('loss', float('nan')):.3f}"
+                    f"   train acc {logs.get('accuracy', 0):6.1%}"
+                    f"   {gone:5.0f}s gone, ~{left:4.0f}s left")
+
+        return _Cb()
+
+
+class Stalled(RuntimeError):
+    """Training sat at chance. Raised so the run stops instead of
+    producing four more folds of the same nothing."""
+
+
+def _guards(cfg, n_classes: int, label: str, state: dict):
+    """Two stopping rules, both reading TRAINING accuracy only.
+
+    Reading the training metric matters. Early stopping on the held-out
+    speakers would choose the epoch that flatters them and quietly turn
+    the cross-validation score into a number that has seen its own test
+    set. Nothing here ever looks at the held-out fold.
+
+      * stall  - at chance well past the point where a working model has
+                 moved, so stop the whole run and say so. An hour of
+                 five folds arriving at 5.0% teaches nothing that the
+                 fifteenth epoch had not already said.
+      * settle - training accuracy has saturated, so the remaining epochs
+                 only cost time. This is what makes EPOCHS a ceiling
+                 rather than a fixed cost.
+    """
+    import tensorflow as tf
+
+    chance = 1.0 / n_classes
+    floor = chance * 1.6
+
+    class _Guard(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+            self.best = 0.0
+            self.flat = 0
+
+        def on_epoch_end(self, epoch, logs=None):
+            acc = (logs or {}).get("accuracy", 0.0)
+            n = epoch + 1
+
+            if cfg.stall_epochs and n >= cfg.stall_epochs and acc < floor:
+                state["stalled"] = (n, acc)
+                self.model.stop_training = True
+                return
+
+            if acc > self.best + 1e-4:
+                self.best, self.flat = acc, 0
+            else:
+                self.flat += 1
+            # Only once it is genuinely trained. Stopping early at a
+            # middling accuracy would also cut the cosine learning-rate
+            # schedule short, which changes the model for the worse.
+            if cfg.patience and self.best >= 0.97 and self.flat >= cfg.patience:
+                state["settled"] = (n, self.best)
+                self.model.stop_training = True
+
+    return _Guard()
+
+
 def fit(X, y, n_classes: int, cfg: Config, seed: int,
-        backup: Path | None = None):
+        backup: Path | None = None, label: str = ""):
     """Fixed number of epochs with cosine decay. No early stopping on purpose:
     stopping on the held-out speakers would leak them into the result.
 
@@ -971,9 +1489,13 @@ def fit(X, y, n_classes: int, cfg: Config, seed: int,
         optimizer=tf.keras.optimizers.Adam(lr),
         loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
         metrics=["accuracy"])
+    # Augmentation off is a diagnostic, not a training mode: it answers
+    # "can this model fit this data at all", separately from "can it fit
+    # it through the augmentation".
+    prep = _augment(n_classes) if cfg.augment else _plain(n_classes)
     ds = (tf.data.Dataset.from_tensor_slices((X, y.astype(np.int32)))
           .shuffle(len(X), seed=seed, reshuffle_each_iteration=True)
-          .map(_augment(n_classes), num_parallel_calls=tf.data.AUTOTUNE)
+          .map(prep, num_parallel_calls=tf.data.AUTOTUNE)
           .batch(cfg.batch).prefetch(tf.data.AUTOTUNE))
     cbs = []
     if backup is not None and cfg.checkpoint:
@@ -984,13 +1506,44 @@ def fit(X, y, n_classes: int, cfg: Config, seed: int,
         except Exception as e:
             cfg.say(f"  (checkpointing off: {e})")
 
+    if cfg.log_every:
+        cbs.append(EpochLog(cfg, label, cfg.epochs).make())
+    state: dict = {}
+    cbs.append(_guards(cfg, n_classes, label, state))
+
     h = trainer.fit(ds, epochs=cfg.epochs, verbose=0, callbacks=cbs)
-    return exporter, float(h.history["accuracy"][-1])
+
+    if "settled" in state:
+        n, best = state["settled"]
+        cfg.say(f"    {label} stopped at epoch {n}: training accuracy "
+                f"settled at {best:.1%}")
+    if "stalled" in state:
+        n, acc = state["stalled"]
+        raise Stalled(
+            f"{label} was still at {acc:.1%} after {n} epochs, against a "
+            f"{1.0 / n_classes:.1%} chance baseline. The model is not "
+            "learning its own training data, so the remaining folds would "
+            "say the same thing an hour from now. Stopping.\n"
+            "        Look at the crop figures first: section 5 of the "
+            "figures notebook shows exactly what the model is being fed.")
+
+    # The whole curve, not just where it ended. Throwing it away meant no
+    # training-curve figure could ever be drawn, and that figure is how a
+    # reader tells "never learned" from "learned and did not generalise".
+    history = {k: [float(x) for x in v] for k, v in h.history.items()}
+    return exporter, float(h.history["accuracy"][-1]), history
 
 
 def predict(exporter, X, batch=32):
     p, e = exporter.predict(_prep(X), batch_size=batch, verbose=0)
     return p, e
+
+
+# Bumped when a change makes previously-saved folds invalid.
+#   2 — crop_and_resize was cutting all 48 boxes from frame 0, so every
+#       augmented clip was 48 copies of a still face and the model sat at
+#       chance on its own training data.
+TRAIN_REV = 2
 
 
 def signature(clips: list[dict], cfg: Config, n_classes: int) -> str:
@@ -1006,6 +1559,12 @@ def signature(clips: list[dict], cfg: Config, n_classes: int) -> str:
         h.update(key.encode())
     h.update(f"|{cfg.folds}|{cfg.epochs}|{cfg.batch}|{cfg.seed}|{n_classes}"
              .encode())
+    # Folds saved by an older pipeline cannot be mixed with new ones: the
+    # augmentation bug that left every clip a still frame produced folds
+    # that look finished and are worthless. Raise this whenever a change
+    # alters what the model is trained on, and every account starts clean
+    # instead of resuming someone else's wrong answer.
+    h.update(f"|rev{TRAIN_REV}".encode())
     return h.hexdigest()[:16]
 
 
@@ -1021,6 +1580,8 @@ def cross_validate(X, y, g, n_classes: int, cfg: Config,
     oof_e = np.zeros((len(X), EMB_DIM), np.float32)
     fold_of = np.full(len(X), -1)
     accs = []
+    train_accs: list[float | None] = []
+    histories: list[dict] = []
     for f, (tr, te) in enumerate(GroupKFold(n_splits=k).split(X, y, g)):
         done = resume / f"fold{f}.npz" if resume is not None else None
         p = e = None
@@ -1031,6 +1592,9 @@ def cross_validate(X, y, g, n_classes: int, cfg: Config,
                     p, e = d["p"], d["e"]
                     cfg.say(f"  fold {f + 1}/{k}: already done in an earlier "
                             f"run -> top-1 {(p.argmax(1) == y[te]).mean():.1%}")
+                    # Reused from disk, so there is no curve for this fold.
+                    train_accs.append(None)
+                    histories.append({})
             except Exception as err:
                 cfg.say(f"  fold {f + 1}/{k}: saved copy unusable ({err})")
         if p is None:
@@ -1039,9 +1603,12 @@ def cross_validate(X, y, g, n_classes: int, cfg: Config,
             require_gpu(cfg, f"before fold {f + 1} of {k}")
             if resume is not None:
                 touch_lock(resume, cfg)
-            model, tr_acc = fit(
+            model, tr_acc, hist = fit(
                 X[tr], y[tr], n_classes, cfg, cfg.seed + f,
-                backup=None if resume is None else resume / f"backup{f}")
+                backup=None if resume is None else resume / f"backup{f}",
+                label=f"fold {f + 1}/{k}")
+            train_accs.append(tr_acc)
+            histories.append(hist)
             p, e = predict(model, X[te])
             if done is not None:
                 save_npz(done, p=p, e=e, idx=te)
@@ -1064,7 +1631,27 @@ def cross_validate(X, y, g, n_classes: int, cfg: Config,
     cm = np.zeros((n_classes, n_classes), int)
     for t, p in zip(y, oof_p.argmax(1)):
         cm[t, p] += 1
-    return {"folds": k, "foldTop1": accs, "top1": top1, "top3": top3,
+    # Said out loud, because it is the single most useful comparison in
+    # the whole run and nobody should have to dig it out of a log.
+    real = [a for a in train_accs if a is not None]
+    if real:
+        mean_tr = float(np.mean(real))
+        cfg.say("")
+        cfg.say(f"  train {mean_tr:.1%}   vs   held-out {top1:.1%}   "
+                f"(chance {1.0 / n_classes:.1%})")
+        if mean_tr <= 1.3 / n_classes:
+            cfg.say("  -> the model did not learn the TRAINING data either. "
+                    "That is a pipeline")
+            cfg.say("     fault, not a shortage of speakers. Check the crop "
+                    "pictures first.")
+        elif top1 <= 1.3 / n_classes:
+            cfg.say("  -> it learned the training speakers and none of the "
+                    "held-out ones:")
+            cfg.say("     overfitting. More speakers, more augmentation, or "
+                    "a smaller model.")
+
+    return {"folds": k, "foldTop1": accs, "foldTrainTop1": train_accs,
+            "foldHistory": histories, "top1": top1, "top3": top3,
             "top1Std": float(np.std(accs)), "chance": 1.0 / n_classes,
             "perSpeaker": per_speaker, "perClass": per_class,
             "confusion": cm.tolist(), "_p": oof_p, "_e": oof_e}
@@ -1298,7 +1885,7 @@ def export(exporter, X, y, spec, data, cv, pers, cfg: Config) -> dict:
         "tts": spec["tts"], "version": version, "file": f"{stem}.tflite",
         "sha256": hashlib.sha256(blob).hexdigest(), "sizeBytes": len(blob),
         "frames": FRAMES, "size": CROP, "fps": TARGET_FPS,
-        "windowS": WINDOW_S, "eyeBoxScale": EYE_BOX_SCALE,
+        "windowS": WINDOW_S, "eyeBoxScale": cfg.crop_scale,
         "embeddingDim": EMB_DIM, "alpha": PERS_ALPHA, "tau": PERS_TAU,
         "minConfidence": 0.55, "labels": spec["phrases"],
         "speakers": data["speakers"], "clips": data["clips"],
@@ -1439,6 +2026,11 @@ def train_and_export(X, y, g, clips, spec, data, cfg: Config,
     n = len(spec["phrases"])
     require_gpu(cfg, "before training")
 
+    # Nothing expensive happens until the data has been shown to be
+    # learnable. Both faults that cost a day would have been caught here
+    # in under two minutes.
+    data["preflight"] = preflight(X, y, g, n, cfg)
+
     sig = signature(clips, cfg, n)
     base = Path(cfg.work_dir) / "resume" / cfg.lang
     base.mkdir(parents=True, exist_ok=True)
@@ -1509,8 +2101,9 @@ def _train_and_export(X, y, g, clips, spec, data, cfg: Config,
     if exporter is None:
         require_gpu(cfg, "before the final model")
         touch_lock(resume, cfg)
-        exporter, _ = fit(X, y, n, cfg, cfg.seed + 100,
-                          backup=resume / "backup_final")
+        exporter, _, _ = fit(X, y, n, cfg, cfg.seed + 100,
+                             backup=resume / "backup_final",
+                             label="final model")
         exporter.save_weights(str(weights))
     done = export(exporter, X, y, spec, data, cv, pers, cfg)
     link = None

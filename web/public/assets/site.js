@@ -1,222 +1,151 @@
-/* ANTARVANI showcase.
+/* The public project page.
  *
- * Everything variable on this page comes from data/figures.json, which the
- * Colab notebook writes. The page is built to be opened before that file
- * exists: every section that needs it degrades to an honest placeholder
- * rather than an empty hole or a crash, because a half-built site in front
- * of a judge is worse than a site that says what is still coming.
+ * Reads the same data/figures.json the dashboard reads, and shows only what
+ * is actually in it: the strip, the corpus counts, the figures, the result.
+ * Everything else on the page is static prose.
+ *
+ * Nothing here needs Firebase and nothing here needs a sign-in, so the page
+ * works on a venue projector with the wifi blocked. It is also the page a
+ * stranger can reach, which is why it carries speaker numbers and never a
+ * volunteer's name: there is no code path in this file that could print one.
  */
 (() => {
   'use strict';
 
-  const $ = (s, r = document) => r.querySelector(s);
-  const el = (tag, cls, html) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (html != null) n.innerHTML = html;
-    return n;
-  };
-  const esc = (s) => String(s).replace(/[&<>"]/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const pct = (x) => `${(x * 100).toFixed(1)}%`;
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+  const pc = (x) => `${(x * 100).toFixed(1)}%`;
 
-  // ------------------------------------------------------- phrases
-  const pg = $('#phraseGrid');
-  if (pg) {
-    (window.PHRASES || []).forEach(([id, hi, ro, en]) => {
-      pg.append(el('div', 'phrase rise',
-        `<div class="id">${esc(id)}</div>
-         <div class="hi" lang="hi">${esc(hi)}</div>
-         <div class="ro">${esc(ro)}</div>
-         <div class="en">${esc(en)}</div>`));
-    });
+  /* ------------------------------------------------------------ phrases */
+  const grid = $('#phraseGrid');
+  if (grid && window.PHRASES) {
+    grid.innerHTML = window.PHRASES.map(([id, hi, tr, en]) =>
+      `<div class="phrase">
+        <div class="id">${esc(id)}</div>
+        <div class="hi">${esc(hi)}</div>
+        <div class="en">${esc(en)}</div>
+      </div>`).join('');
   }
 
-  // ------------------------------------------------------ lightbox
-  const lb = $('#lb'), lbImg = $('#lbImg');
-  const openLb = (src, alt) => {
-    lbImg.src = src;
-    lbImg.alt = alt || '';
-    lb.classList.add('on');
-    document.body.style.overflow = 'hidden';
-  };
-  const closeLb = () => {
-    lb.classList.remove('on');
-    lbImg.src = '';
-    document.body.style.overflow = '';
-  };
-  if (lb) {
-    lb.addEventListener('click', closeLb);
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && lb.classList.contains('on')) closeLb();
-    });
+  const built = $('#builtAt');
+  if (built) {
+    built.textContent = new Date().toLocaleDateString(undefined,
+      { year: 'numeric', month: 'long' });
   }
 
-  const figure = (f) => {
-    const fig = el('figure', `fig rise${f.wide ? ' wide' : ''}`);
-    const btn = el('button', 'shot');
-    btn.type = 'button';
-    const img = el('img');
-    img.src = `data/${f.file}`;
-    img.alt = f.title || f.file;
-    img.loading = 'lazy';
-    // A figure the export did not produce leaves no broken frame behind.
-    img.addEventListener('error', () => fig.remove());
-    btn.append(img);
-    btn.addEventListener('click', () => openLb(img.src, img.alt));
-    fig.append(btn);
-    if (f.title || f.caption) {
-      fig.append(el('figcaption', null,
-        `${f.title ? `<b>${esc(f.title)}</b>` : ''}${esc(f.caption || '')}`));
-    }
-    return fig;
-  };
+  /* -------------------------------------------------------------- data */
+  const figCard = (f) => `<div class="fig${f.wide ? ' wide' : ''}">
+    <button class="shot" type="button" data-cap="${esc(f.title)} — ${esc(f.caption)}">
+      <img src="data/${esc(f.file)}" alt="${esc(f.title)}" loading="lazy">
+    </button>
+    <div class="meta">
+      <h4>${esc(f.title)}</h4>
+      <p>${esc(f.caption)}</p>
+    </div>
+  </div>`;
 
-  const stat = (n, l, plain) =>
-    el('div', `stat rise${plain ? ' plain' : ''}`,
-      `<div class="n">${esc(n)}</div><div class="l">${esc(l)}</div>`);
-
-  // -------------------------------------------------- scroll reveal
-  const io = 'IntersectionObserver' in window
-    ? new IntersectionObserver((rows) => {
-        rows.forEach((r) => {
-          if (r.isIntersecting) { r.target.classList.add('in'); io.unobserve(r.target); }
-        });
-      }, { rootMargin: '0px 0px -8% 0px' })
-    : null;
-  const watch = (root = document) => {
-    root.querySelectorAll('.rise:not(.in)').forEach((n) => {
-      if (io) io.observe(n); else n.classList.add('in');
-    });
-  };
-
-  // Lazily loaded figures change the page height after the observer has
-  // made its mind up, and a section can end up permanently faded out. A
-  // single sweep once everything has settled costs nothing and removes
-  // the whole class of failure.
-  const revealAll = () =>
-    document.querySelectorAll('.rise:not(.in)').forEach((n) => n.classList.add('in'));
-  window.addEventListener('load', () => setTimeout(revealAll, 1200));
-  setTimeout(revealAll, 4000);
-
-  // ------------------------------------------------------ the data
-  const nothingYet = (what) => el('div', 'notice',
-    `${esc(what)} appear here once the figures notebook has been run. ` +
-    'Open <code>pipeline/ANTARVANI_figures.ipynb</code> in Colab, Run all, ' +
-    'and unzip its download into <code>web/public/data/</code>.');
+  const waiting = (what) => `<div class="empty"><b>${esc(what)}</b>
+    <p style="margin:0">They are exported by
+    <code>pipeline/ANTARVANI_figures.ipynb</code> into
+    <code>web/public/data/</code>. This page shows nothing rather than a
+    placeholder until they are there.</p></div>`;
 
   fetch('data/figures.json', { cache: 'no-store' })
-    .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+    .then((r) => (r.ok ? r.json() : null))
     .then(render)
-    .catch(() => render(null))
-    .finally(watch);
+    .catch(() => render(null));
 
-  function render(d) {
-    const foot = $('#builtAt');
-    if (foot) {
-      foot.textContent = d && d.generatedUtc
-        ? `Figures generated ${new Date(d.generatedUtc).toLocaleDateString(
-            undefined, { day: 'numeric', month: 'long', year: 'numeric' })}`
-        : '';
+  function render(w) {
+    const figs = (w && w.figures) || [];
+
+    /* the filmstrip, if a consenting face was exported with it */
+    if (w && w.strip && w.strip.length) {
+      $('#stripRail').innerHTML = w.strip.map((f, i) =>
+        `<img src="data/${esc(f)}" alt="Mouth crop, frame ${i + 1}" loading="lazy">`
+      ).join('');
+      $('#stripWho').textContent = w.stripWho || '';
+      $('#strip').hidden = false;
     }
 
-    // ---- hero filmstrip, only when the export provided one
-    if (d && Array.isArray(d.strip) && d.strip.length) {
-      const rail = $('#stripRail');
-      let shown = 0;
-      d.strip.forEach((file) => {
-        const img = el('img');
-        img.src = `data/${file}`;
-        img.alt = 'A single mouth crop as the model receives it';
-        img.loading = 'lazy';
-        img.addEventListener('error', () => img.remove());
-        img.addEventListener('load', () => { if (!shown++) $('#strip').hidden = false; });
-        rail.append(img);
-      });
-      const who = $('#stripWho');
-      if (who) who.textContent = d.stripWho || '';
-    }
-
-    // ---- corpus
+    /* corpus counts, straight from the export */
     const cs = $('#corpusStats');
-    const c = (d && d.corpus) || null;
     if (cs) {
-      if (c) {
-        cs.append(stat(c.speakers, 'volunteers recorded'));
-        cs.append(stat(c.clips, 'clips in the corpus'));
-        cs.append(stat(c.phrases, 'phrases, every one of them'));
-        cs.append(stat(`${c.minutes} min`, 'of video, no audio', true));
+      if (w && w.corpus) {
+        const c = w.corpus;
+        cs.innerHTML = [
+          [c.speakers, 'speakers'],
+          [c.clips, 'clips recorded'],
+          [c.phrases, 'phrases, each a whole utterance'],
+          [`${c.minutes} min`, 'of video, no audio'],
+        ].map(([n, l]) =>
+          `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`)
+          .join('');
       } else {
-        cs.replaceWith(nothingYet('Corpus figures'));
+        cs.innerHTML = '';
       }
     }
 
-    const byGroup = (g) => ((d && d.figures) || []).filter((f) => f.group === g);
-    const fill = (sel, group) => {
-      const host = $(sel);
-      if (!host) return;
-      const rows = byGroup(group);
-      rows.forEach((f) => host.append(figure(f)));
-      return rows.length;
-    };
-    fill('#corpusFigs', 'corpus');
-    fill('#modelFigs', 'model');
+    const cf = $('#corpusFigs');
+    if (cf) {
+      const mine = figs.filter((f) => f.group === 'corpus');
+      cf.innerHTML = mine.length ? mine.map(figCard).join('')
+        : waiting('The corpus figures have not been exported yet');
+    }
 
-    // ---- results
+    const mf = $('#modelFigs');
+    if (mf) {
+      const mine = figs.filter((f) => f.group === 'model');
+      mf.innerHTML = mine.length ? mine.map(figCard).join('') : '';
+    }
+
+    /* the result, said plainly whichever way it came out */
     const body = $('#resultsBody');
     if (!body) return;
-    const r = d && d.results;
 
-    if (!r) {
-      body.append(el('div', 'notice',
-        '<b>Model training is the next stage.</b><br>' +
-        'The corpus, the app and the pipeline are built and running; the ' +
-        'evaluation is the work of Major Project 2. Figures appear here ' +
-        'automatically from the training run — this page does not hold a ' +
-        'number that an experiment has not produced.'));
+    if (!w || !w.results) {
+      $('#resultsHead').textContent = 'Not measured yet.';
+      $('#resultsLede').textContent =
+        'The corpus is collected and the pipeline runs end to end. The '
+        + 'cross-validation result goes here the moment there is one, and '
+        + 'until then this section stays empty on purpose.';
+      body.innerHTML = waiting('No training run has been published yet');
       return;
     }
 
-    const tiles = el('div', 'stats g4');
-    tiles.append(stat(pct(r.top1), 'top-1, speaker never seen in training'));
-    tiles.append(stat(pct(r.top3), 'top-3, speaker never seen'));
-    if (r.personalisedBest != null) {
-      tiles.append(stat(pct(r.personalisedBest),
-        `with ${r.personalisedShots || 'a few'} of the user's own clips`));
-    }
-    tiles.append(stat(pct(r.chance), 'chance, for 20 phrases', true));
-    body.append(tiles);
+    const r = w.results;
+    $('#resultsHead').textContent = r.atChance
+      ? 'At chance, and reported as such.'
+      : `${pc(r.top1)} on speakers the model had never met.`;
 
-    const head = $('#resultsHead'), lede = $('#resultsLede');
-    if (r.atChance) {
-      // The honest version of a bad number, stated before anyone asks.
-      if (head) head.textContent = 'Preliminary — the model is still at chance.';
-      if (lede) {
-        lede.textContent =
-          'This is reported as it came out of the run. A model at chance is ' +
-          'predicting the same phrase whatever it is shown, which points at ' +
-          'the pipeline rather than at the size of the corpus; diagnosis is ' +
-          'in progress and the figures below are the evidence.';
-      }
-      body.append(el('div', 'notice bad',
-        '<b>Read this before the numbers below.</b> Top-1 is at or near the ' +
-        '1-in-20 baseline, so the model has not learned to tell the phrases ' +
-        'apart yet. The corpus, the app and the training pipeline all work ' +
-        'end to end; what is shown here is a diagnosis in progress, not a ' +
-        'result we are claiming.'));
-    } else if (lede) {
-      lede.textContent =
-        `${r.protocol || 'Leave-speakers-out cross-validation'}: every test ` +
-        'clip was predicted by a model that never saw that person. Standard ' +
-        `deviation across folds ${(100 * (r.top1Std || 0)).toFixed(1)} points.`;
-    }
+    let h = r.atChance
+      ? `<div class="notice bad"><b>This run did not beat chance.</b><br>
+         Top-1 is ${pc(r.top1)} against a ${pc(r.chance)} baseline. It is on
+         the page because a result that is reported honestly can be fixed and
+         one that is dressed up cannot.</div>`
+      : `<div class="notice good"><b>${esc(r.protocol)}.</b><br>
+         No test clip was predicted by a model that had met that person, which
+         is the only number that says anything about a new patient.</div>`;
 
-    const figs = byGroup('results');
-    if (figs.length) {
-      const host = el('div', 'grid figs');
-      host.style.marginTop = '22px';
-      figs.forEach((f) => host.append(figure(f)));
-      body.append(host);
-    }
+    h += `<div class="grid g4" style="margin-top:16px">
+      <div class="stat ${r.atChance ? 'bad' : 'good'}">
+        <div class="n">${pc(r.top1)}</div><div class="l">top-1, unseen speakers</div>
+        ${r.top1Std ? `<div class="s">± ${pc(r.top1Std)} across ${esc(r.folds)} folds</div>` : ''}
+      </div>
+      <div class="stat"><div class="n">${pc(r.top3)}</div><div class="l">top-3</div></div>
+      <div class="stat quiet"><div class="n">${pc(r.chance)}</div>
+        <div class="l">chance</div><div class="s">1 in 20</div></div>
+      ${r.personalisedBest
+    ? `<div class="stat good"><div class="n">${pc(r.personalisedBest)}</div>
+         <div class="l">after personalisation</div>
+         <div class="s">${esc(r.personalisedShots)} of the user's own clips per phrase</div></div>`
+    : `<div class="stat quiet"><div class="n">${esc(r.folds)}</div><div class="l">folds</div></div>`}
+    </div>`;
+
+    const mine = figs.filter((f) => f.group === 'results');
+    if (mine.length) h += `<div class="figs" style="margin-top:20px">${mine.map(figCard).join('')}</div>`;
+
+    body.innerHTML = h;
   }
 })();
